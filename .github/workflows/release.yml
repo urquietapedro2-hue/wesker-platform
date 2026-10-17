@@ -20,7 +20,17 @@ jobs:
           echo "VERSION=$V" >> "$GITHUB_ENV"
       - run: pip install -r requirements.txt pyinstaller==6.11.1
       - name: Compilar
-        run: pyinstaller --noconfirm --windowed --name WESKER --add-data "desktop/app_config.json;." --add-data "desktop/app_config.json;desktop" --hidden-import=supabase --hidden-import=gotrue --hidden-import=postgrest --hidden-import=realtime --hidden-import=storage3 desktop/main.py
+        run: pyinstaller --noconfirm --windowed --name WESKER --add-data "desktop/app_config.json;." desktop/main.py
+      - name: Prueba de humo (el .exe abre y la ventana sigue viva)
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:WESKER_SMOKETEST = "1"
+          $p = Start-Process -FilePath "dist\WESKER\WESKER.exe" -Wait -PassThru
+          $log = Join-Path $env:APPDATA "WESKER\crash.log"
+          if (Test-Path $log) { Get-Content $log }
+          if ($p.ExitCode -ne 0) { Write-Host "El ejecutable falló con código $($p.ExitCode)"; exit 1 }
       - name: Instalador
         run: |
           choco install innosetup -y --no-progress
