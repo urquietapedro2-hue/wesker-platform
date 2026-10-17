@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WESKER</title>
+<style>
+:root{color-scheme:dark;--bg:#0f1419;--panel:#161d26;--line:#26313f;--tx:#e2e8f0;--mut:#94a3b8;--acc:#38bdf8;--ok:#4ade80;--bad:#f87171}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 "Segoe UI",system-ui,sans-serif;padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom)}
+main{max-width:460px;margin:0 auto;padding:40px 0}
+h1{font-size:28px;letter-spacing:.3em;margin:0 0 4px;text-align:center}
+.sub{color:var(--mut);text-align:center;margin:0 0 28px}
+input,button{width:100%;font:inherit;border-radius:8px;padding:12px 14px;margin-bottom:10px}
+input{background:var(--panel);border:1px solid var(--line);color:var(--tx)}
+input:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button{background:#0284c7;border:1px solid var(--acc);color:#fff;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;border-color:var(--line);color:var(--mut);width:auto;margin:0;padding:8px 14px}
+#msg{min-height:1.5em;text-align:center;color:var(--mut)}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+.head strong{font-size:18px;display:block}.head span{color:var(--mut)}
+ul{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+li{display:flex;gap:12px;align-items:center;padding:12px 14px;background:var(--panel)}
+li+li{border-top:1px solid var(--line)}
+li i{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}
+li small{color:var(--mut);margin-left:auto;text-align:right}
+.empty{color:var(--mut);padding:14px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>WESKER</h1>
+  <p class="sub">Planta virtual compartida</p>
+  <form id="login">
+    <input id="email" type="email" placeholder="Correo" autocomplete="username" required>
+    <input id="pwd" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+    <button type="submit">Entrar</button>
+  </form>
+  <p id="msg" role="status"></p>
+  <section id="panel" hidden>
+    <div class="head"><div><strong id="quien"></strong><span id="rol"></span></div><button class="ghost" id="salir">Cerrar sesión</button></div>
+    <h2 style="font-size:15px;color:var(--mut);font-weight:500">Conectados ahora</h2>
+    <ul id="lista"></ul>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const CFG = { url: "https://TU_PROYECTO.supabase.co", key: "TU_ANON_KEY", version: "0.1.0" };
+const $ = (id) => document.getElementById(id);
+const sb = supabase.createClient(CFG.url, CFG.key);
+let timers = [];
+
+const msg = (t, bad) => { $("msg").textContent = t; $("msg").style.color = bad ? "var(--bad)" : "var(--mut)"; };
+
+async function pulso() {
+  await sb.rpc("heartbeat", { p_client: "web", p_version: CFG.version });
+  const { data, error } = await sb.rpc("online_users");
+  if (error) return msg("Sin conexión con la nube. Reintentando…", true);
+  msg("");
+  const ul = $("lista"); ul.replaceChildren();
+  if (!data.length) { const e = document.createElement("li"); e.className = "empty"; e.textContent = "Nadie conectado."; ul.append(e); }
+  for (const u of data) {
+    const li = document.createElement("li"), d = document.createElement("i"), n = document.createElement("span"), s = document.createElement("small");
+    n.textContent = u.nombre; s.textContent = u.client === "web" ? "App web" : "Escritorio " + u.version;
+    li.append(d, n, s); ul.append(li);
+  }
+}
+
+async function mostrar() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return;
+  const { data: p } = await sb.from("profiles").select("nombre,role,activo").eq("id", session.user.id).single();
+  if (!p || !p.activo) { await sb.auth.signOut(); return msg("Tu usuario no tiene acceso. Pide al administrador que lo active.", true); }
+  $("quien").textContent = p.nombre || session.user.email; $("rol").textContent = "Rol: " + p.role;
+  $("login").hidden = true; $("panel").hidden = false;
+  await pulso(); timers = [setInterval(pulso, 5000)];
+}
+
+$("login").addEventListener("submit", async (e) => {
+  e.preventDefault(); msg("Conectando…");
+  const email = $("email").value.trim();
+  const { error } = await sb.auth.signInWithPassword({ email, password: $("pwd").value });
+  if (error) { $("pwd").value = ""; await sb.rpc("log_failed_login", { p_email: email }); return msg("Correo o contraseña incorrectos.", true); }
+  await sb.rpc("log_event", { p_action: "LOGIN_OK", p_detail: { client: "web" } });
+  msg(""); mostrar();
+});
+
+$("salir").addEventListener("click", async () => {
+  timers.forEach(clearInterval);
+  await sb.rpc("log_event", { p_action: "LOGOUT", p_detail: { client: "web" } });
+  await sb.rpc("leave_presence", { p_client: "web" });
+  await sb.auth.signOut();
+  $("panel").hidden = true; $("login").hidden = false; $("pwd").value = "";
+});
+
+mostrar();
+</script>
+</body>
+</html>

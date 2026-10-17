@@ -1,0 +1,34 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Versión desde la etiqueta
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          echo "__version__ = \"$V\"" > desktop/core/version.py
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+      - run: pip install -r requirements.txt pyinstaller==6.11.1
+      - name: Compilar
+        run: pyinstaller --noconfirm --windowed --name WESKER --add-data "desktop/app_config.json;." desktop/main.py
+      - name: Instalador
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:VERSION" installer\wesker.iss
+      - name: Firma SHA-256
+        run: (Get-FileHash dist_installer\WESKER-Setup.exe -Algorithm SHA256).Hash.ToLower() | Out-File -NoNewline -Encoding ascii dist_installer\WESKER-Setup.exe.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist_installer/WESKER-Setup.exe
+            dist_installer/WESKER-Setup.exe.sha256
