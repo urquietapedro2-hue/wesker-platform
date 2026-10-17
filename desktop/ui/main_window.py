@@ -1,20 +1,22 @@
-from datetime import datetime, timezone
-
 from PyQt5 import QtCore, QtWidgets
 
 from core import updater
 from core.version import __version__
+from ui.albert_page import AlbertPage
 from ui.common import UpdateBanner, run_async
+from ui.users_page import UsersPage
+from ui.zeno_page import ZenoPage
 
-COLUMNAS = ["Nombre", "Rol", "Cliente", "Versión", "Visto"]
-
-
-def hace(ts: str) -> str:
-    try:
-        seg = (datetime.now(timezone.utc) - datetime.fromisoformat(ts.replace("Z", "+00:00"))).total_seconds()
-    except ValueError:
-        return "—"
-    return "ahora" if seg < 20 else f"hace {int(seg)} s"
+EXTRA_STYLE = """
+QListWidget{background:#131a22;border:1px solid #1e293b;border-radius:6px;padding:4px;outline:0}
+QListWidget::item{padding:10px 12px;border-radius:4px}
+QListWidget::item:selected{background:#0c4a6e;color:#e0f2fe}
+QGroupBox{border:1px solid #26313f;border-radius:6px;margin-top:10px;padding:12px 8px 8px 8px;font-weight:600;color:#94a3b8}
+QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px}
+QComboBox,QSpinBox{background:#1a222c;border:1px solid #334155;border-radius:6px;padding:6px 8px}
+QLabel#valor{font-weight:600;color:#e2e8f0}
+QLabel#alerta{color:#fbbf24}
+"""
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -24,7 +26,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._busy, self._bloqueada = False, False
         p = client.profile
         self.setWindowTitle(f"WESKER {__version__}")
-        self.resize(760, 520)
+        self.resize(1180, 760)
+        self.setStyleSheet(EXTRA_STYLE)
 
         root = QtWidgets.QWidget()
         self.setCentralWidget(root)
@@ -43,17 +46,30 @@ class MainWindow(QtWidgets.QMainWindow):
         top.addWidget(salir)
 
         self.banner = UpdateBanner(cfg["github_repo"])
-        self.tabla = QtWidgets.QTableWidget(0, len(COLUMNAS))
-        self.tabla.setHorizontalHeaderLabels(COLUMNAS)
-        self.tabla.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-        self.tabla.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.users = UsersPage()
+        self.albert = AlbertPage(p["role"], self.auditar)
+        self.zeno = ZenoPage(p["role"], self.auditar)
+        self.stack = QtWidgets.QStackedWidget()
+        for page in (self.users, self.albert, self.zeno):
+            self.stack.addWidget(page)
+        self.nav = QtWidgets.QListWidget()
+        self.nav.setFixedWidth(170)
+        self.nav.addItems(["Conectados", "Albert (dosificadora)", "Zeno (AGV)"])
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+
+        self.body = QtWidgets.QWidget()
+        bl = QtWidgets.QHBoxLayout(self.body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.addWidget(self.nav)
+        bl.addWidget(self.stack, 1)
+
         self.estado = QtWidgets.QLabel("Conectando con la nube…")
         self.estado.setObjectName("muted")
 
         lay.addLayout(top)
         lay.addWidget(self.banner)
-        lay.addWidget(QtWidgets.QLabel("Conectados ahora"))
-        lay.addWidget(self.tabla, 1)
+        lay.addWidget(self.body, 1)
         lay.addWidget(self.estado)
 
         self.banner.comprobar()
@@ -63,10 +79,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer.start(15000)
         self._tick()
 
+    def auditar(self, accion, detalle=None):
+        """Evento de auditoría en segundo plano: nunca bloquea la ventana."""
+        run_async(self, self.client.log_event, lambda _r: None, None, accion, detalle or {})
+
     def _check_min(self, minima):
         if updater.is_newer(minima, __version__):
             self._bloqueada = True
-            self.tabla.setEnabled(False)
+            self.body.setEnabled(False)
             self.estado.setText(f"Esta versión ya no es compatible (mínima: {minima}). Actualiza para continuar.")
             self.estado.setStyleSheet("color:#ef4444")
 
@@ -82,10 +102,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _pintar(self, filas):
         self._busy = False
-        self.tabla.setRowCount(len(filas))
-        for i, u in enumerate(filas):
-            for j, v in enumerate((u["nombre"], u["role"], u["client"], u["version"], hace(u["last_seen"]))):
-                self.tabla.setItem(i, j, QtWidgets.QTableWidgetItem(v or ""))
+        self.users.pintar(filas)
         if not self._bloqueada:
             self.estado.setText(f"Conectado a la nube. {len(filas)} sesión(es) activa(s).")
             self.estado.setStyleSheet("color:#4ade80")
