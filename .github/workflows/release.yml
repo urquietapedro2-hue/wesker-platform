@@ -1,48 +1,33 @@
 name: release
-
 on:
   push:
     tags: ["v*"]
-
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Versión desde la etiqueta
         shell: bash
         run: |
           V="${GITHUB_REF_NAME#v}"
           echo "__version__ = \"$V\"" > desktop/core/version.py
           echo "VERSION=$V" >> "$GITHUB_ENV"
-
-      - name: Instalar dependencias
-        run: pip install -r requirements.txt pyinstaller==6.11.1
-
-      - name: Compilar ejecutable con PyInstaller
-        run: |
-          cd desktop
-          pyinstaller --noconfirm --windowed --name WESKER --add-data "app_config.json;." --hidden-import=supabase --hidden-import=gotrue --hidden-import=postgrest --hidden-import=realtime --hidden-import=storage3 main.py
-
-      - name: Generar Instalador con Inno Setup
+      - run: pip install -r requirements.txt pyinstaller==6.11.1
+      - name: Compilar
+        run: pyinstaller --noconfirm --windowed --name WESKER --add-data "desktop/app_config.json;." --add-data "desktop/app_config.json;desktop" --hidden-import=supabase --hidden-import=gotrue --hidden-import=postgrest --hidden-import=realtime --hidden-import=storage3 desktop/main.py
+      - name: Instalador
         run: |
           choco install innosetup -y --no-progress
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:VERSION" installer\wesker.iss
-
       - name: Firma SHA-256
-        run: |
-          (Get-FileHash dist_installer\WESKER-Setup.exe -Algorithm SHA256).Hash.ToLower() | Out-File -NoNewline -Encoding ascii dist_installer\WESKER-Setup.exe.sha256
-
-      - name: Publicar Release en GitHub
-        uses: softprops/action-gh-release@v2
+        run: (Get-FileHash dist_installer\WESKER-Setup.exe -Algorithm SHA256).Hash.ToLower() | Out-File -NoNewline -Encoding ascii dist_installer\WESKER-Setup.exe.sha256
+      - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist_installer/WESKER-Setup.exe
