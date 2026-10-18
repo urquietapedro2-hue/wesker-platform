@@ -1,9 +1,11 @@
 from PyQt5 import QtCore, QtWidgets
 
 from core import updater
+from core.shared import EstadoCompartido
 from core.version import __version__
 from ui.albert_page import AlbertPage
 from ui.common import UpdateBanner, run_async
+from ui.shared_sync import Sincronizador
 from ui.users_page import UsersPage
 from ui.zeno_page import ZenoPage
 
@@ -20,9 +22,10 @@ QLabel#alerta{color:#fbbf24}
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, client, cfg, on_logout):
+    def __init__(self, client, cfg, on_logout, shared=None):
         super().__init__()
         self.client, self.on_logout = client, on_logout
+        self.shared = shared or EstadoCompartido(client)
         self._busy, self._bloqueada = False, False
         p = client.profile
         self.setWindowTitle(f"WESKER {__version__}")
@@ -47,8 +50,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.banner = UpdateBanner(cfg["github_repo"])
         self.users = UsersPage()
-        self.albert = AlbertPage(p["role"], self.auditar)
-        self.zeno = ZenoPage(p["role"], self.auditar)
+        self.sync = Sincronizador(self.shared, self)
+        self.albert = AlbertPage(p["role"], self.auditar, self.sync)
+        self.zeno = ZenoPage(p["role"], self.auditar, self.sync)
         self.stack = QtWidgets.QStackedWidget()
         for page in (self.users, self.albert, self.zeno):
             self.stack.addWidget(page)
@@ -86,6 +90,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _check_min(self, minima):
         if updater.is_newer(minima, __version__):
             self._bloqueada = True
+            self.sync.detener()
             self.body.setEnabled(False)
             self.estado.setText(f"Esta versión ya no es compatible (mínima: {minima}). Actualiza para continuar.")
             self.estado.setStyleSheet("color:#ef4444")
@@ -112,12 +117,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.estado.setText(f"{msg} Reintentando…")
         self.estado.setStyleSheet("color:#f59e0b")
 
+    def _soltar_nodos(self):
+        """Libera los nodos que esta PC publica para que otra persona pueda tomarlos enseguida."""
+        if not getattr(self.client, "token", True):
+            return  # ya no hay sesión: el servidor lo suelta solo a los 10 s
+        for page in (self.albert, self.zeno):
+            if page.publicando:
+                try:
+                    self.shared.liberar(page.NODO, timeout=2)
+                except Exception:
+                    pass  # si no hay red, el servidor lo suelta solo a los 10 s
+
     def _logout(self):
+        self.sync.detener()
+        self._soltar_nodos()
         self.client.sign_out()
         self.on_logout()
         self.close()
 
     def closeEvent(self, event):
         self.timer.stop()
+        self.sync.detener()
+        self._soltar_nodos()
         self.client.sign_out()
         super().closeEvent(event)

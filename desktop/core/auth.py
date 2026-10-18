@@ -1,4 +1,5 @@
 """Cliente mínimo de Supabase (Auth + RPC) por REST. Sin SDK, sin secretos: solo la anon key pública."""
+import threading
 import time
 
 import requests
@@ -18,6 +19,7 @@ class SupabaseClient:
         self.expires_at = 0.0
         self.user_id = None
         self.profile = None
+        self._lock = threading.Lock()  # un solo hilo renueva el token
 
     # ---------- HTTP ----------
     def _headers(self, with_token=True):
@@ -26,7 +28,9 @@ class SupabaseClient:
 
     def _request(self, method, path, with_token=True, timeout=None, **kw):
         if with_token and self.token and time.time() > self.expires_at - 60:
-            self._refresh()
+            with self._lock:
+                if self.token and time.time() > self.expires_at - 60:
+                    self._refresh()
         try:
             return requests.request(method, f"{self.url}{path}", headers=self._headers(with_token),
                                     timeout=timeout or self.timeout, **kw)

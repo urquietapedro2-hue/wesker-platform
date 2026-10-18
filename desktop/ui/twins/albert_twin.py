@@ -1,4 +1,4 @@
-# Portado de WESKER 3.0 sin cambiar el dibujo. Las rutas hacia los clientes TCP reales (albert_client, sellador_client)
+# Portado de WESKER 3.0 sin cambiar el dibujo. Añadido en v1.2.0: exportar_estado/importar_estado y modo espejo (final del archivo). Las rutas hacia los clientes TCP reales (albert_client, sellador_client)
 # quedan inactivas porque la página no las define; se reconectarán cuando los nodos reales entren a la plataforma.
 # -*- coding: utf-8 -*-
 """
@@ -451,6 +451,9 @@ class AlbertDigitalTwin(QtWidgets.QWidget):
         self.update()
 
     def _animar(self):
+        if self.espejo:
+            self._animar_espejo()
+            return
         needs_update = False
 
         if abs(self.angulo_estrella - self.angulo_objetivo) > 0.3:
@@ -1255,3 +1258,115 @@ class AlbertDigitalTwin(QtWidgets.QWidget):
         painter.drawEllipse(QtCore.QPointF(x, y + 20), 19, 5)
 
         painter.restore()
+
+    # ------------------------------------------------------------------
+    # Gemelo compartido (añadido en v1.2.0). El publicador exporta su estado; el espejo lo recibe.
+    # El espejo NO ejecuta la lógica del proceso: solo suaviza el movimiento hacia lo recibido.
+    # ------------------------------------------------------------------
+    espejo = False
+    _tolva_obj = 0.0
+
+    def exportar_estado(self) -> dict:
+        """Estado del proceso en tipos simples (viaja como JSON, ~0.5 KB)."""
+        return {
+            "modo": self.modo_operacion, "receta": self.secuencia_auto_tipo,
+            "dinamica": self.es_secuencia_dinamica, "resumen": self.texto_resumen_secuencia,
+            "motor": self.estado_motor_txt, "ang_obj": self.angulo_objetivo, "silo": self.vasos_en_silo,
+            "slots": list(self.vasos_en_slots), "tapas": list(self.vasos_con_tapa),
+            "terminados": self.vasos_terminados, "est1": self.estado_estacion1,
+            "tolva": round(self.nivel_tolva, 1), "tipo_tolva": self.tipo_frijol_tolva,
+            "servo_tolva": self.servo_tolva, "servos": list(self.servos_silos), "fase": self.fase_dosif,
+            "silo_desc": self.silo_en_descarga, "comp_obj": list(self.angulos_objetivo),
+            "silos_sel": list(self.silos_seleccionados), "tapa_obj": self.angulo_servo_tapas_obj,
+            "tapa_anim": self.tapa_dispensando_anim, "piston_obj": self.pos_piston_sello_obj,
+            "sellando": self.sellando_activo,
+        }
+
+    def importar_estado(self, d: dict):
+        """Aplica un estado recibido (solo en modo espejo). Los datos incompletos se ignoran campo a campo."""
+        self.modo_operacion = d.get("modo", self.modo_operacion)
+        self.secuencia_auto_tipo = d.get("receta", self.secuencia_auto_tipo)
+        self.es_secuencia_dinamica = bool(d.get("dinamica", self.es_secuencia_dinamica))
+        self.texto_resumen_secuencia = d.get("resumen", self.texto_resumen_secuencia)
+        self.estado_motor_txt = d.get("motor", self.estado_motor_txt)
+        destino = float(d.get("ang_obj", self.angulo_objetivo))
+        if abs(destino - self.angulo_estrella) > 200.0:  # quien llega tarde salta, no gira vueltas
+            self.angulo_estrella = destino
+        self.angulo_objetivo = destino
+        self.vasos_en_silo = int(d.get("silo", self.vasos_en_silo))
+        for clave, atributo in (("slots", "vasos_en_slots"), ("tapas", "vasos_con_tapa")):
+            valor = d.get(clave)
+            if isinstance(valor, list) and len(valor) == 8:
+                setattr(self, atributo, list(valor))
+        self.vasos_terminados = int(d.get("terminados", self.vasos_terminados))
+        self.estado_estacion1 = d.get("est1", self.estado_estacion1)
+        self._tolva_obj = float(d.get("tolva", self._tolva_obj))
+        self.tipo_frijol_tolva = d.get("tipo_tolva", self.tipo_frijol_tolva)
+        self.servo_tolva = bool(d.get("servo_tolva", self.servo_tolva))
+        self.fase_dosif = d.get("fase", self.fase_dosif)
+        self.dosificando_activo = self.fase_dosif != "REPOSO"
+        self.silo_en_descarga = int(d.get("silo_desc", self.silo_en_descarga))
+        self.angulo_servo_tapas_obj = float(d.get("tapa_obj", self.angulo_servo_tapas_obj))
+        self.tapa_dispensando_anim = bool(d.get("tapa_anim", self.tapa_dispensando_anim))
+        self.pos_piston_sello_obj = float(d.get("piston_obj", self.pos_piston_sello_obj))
+        self.sellando_activo = bool(d.get("sellando", self.sellando_activo))
+        for clave, atributo, largo in (("servos", "servos_silos", 3), ("comp_obj", "angulos_objetivo", 3)):
+            valor = d.get(clave)
+            if isinstance(valor, list) and len(valor) == largo:
+                setattr(self, atributo, list(valor))
+        sel = d.get("silos_sel")
+        if isinstance(sel, list):
+            self.silos_seleccionados = list(sel)
+        self.update()
+
+    def _animar_espejo(self):
+        """Solo lo visual: acerca los valores mostrados a los recibidos. No decide nada del proceso."""
+        cambio = False
+        if abs(self.angulo_estrella - self.angulo_objetivo) > 0.3:
+            self.angulo_estrella += (self.angulo_objetivo - self.angulo_estrella) * 0.18
+            cambio = True
+        elif self.angulo_estrella != self.angulo_objetivo:
+            self.angulo_estrella = self.angulo_objetivo
+            cambio = True
+        if abs(self.angulo_servo_tapas_obj - self.angulo_servo_tapas) > 0.5:
+            self.angulo_servo_tapas += 10.0 if self.angulo_servo_tapas_obj > self.angulo_servo_tapas else -10.0
+            cambio = True
+        if abs(self.pos_piston_sello_obj - self.pos_piston_sello) > 0.02:
+            self.pos_piston_sello += 0.08 if self.pos_piston_sello_obj > self.pos_piston_sello else -0.08
+            cambio = True
+        if abs(self._tolva_obj - self.nivel_tolva) > 0.5:
+            self.nivel_tolva += max(-8.0, min(8.0, self._tolva_obj - self.nivel_tolva))
+            cambio = True
+        for s in range(3):
+            obj, act = self.angulos_objetivo[s], self.angulos_compuertas[s]
+            if abs(obj - act) > 0.5:
+                paso = 4.5 if obj > act else 5.5
+                self.angulos_compuertas[s] = min(obj, act + paso) if act < obj else max(obj, act - paso)
+                cambio = True
+        e1 = e2 = e3 = False
+        for i in range(8):
+            ang = ((i * 45.0) + self.angulo_estrella) % 360.0
+            if self.vasos_en_slots[i] is None:
+                continue
+            e1 = e1 or abs(ang - 180.0) <= 7.0
+            e2 = e2 or abs(ang - 270.0) <= 7.0
+            e3 = e3 or abs(ang - 0.0) <= 7.0 or abs(ang - 360.0) <= 7.0
+        tolva_ok = self.nivel_tolva >= 75.0
+        if (self.sensor_fc51_e1, self.sensor_fc51_e2, self.sensor_fc51_e3, self.sensor_ky032_tolva) != (e1, e2, e3, tolva_ok):
+            self.sensor_fc51_e1, self.sensor_fc51_e2, self.sensor_fc51_e3, self.sensor_ky032_tolva = e1, e2, e3, tolva_ok
+            cambio = True
+        if self.fase_dosif == "VERTIDO" and self.silo_en_descarga >= 0:
+            self._generar_particulas_frijol(self.silo_en_descarga)
+        if self.particulas_frijol:
+            vivas = []
+            for p in self.particulas_frijol:
+                p["x"] += p["vx"]
+                p["y"] += p["vy"]
+                p["vy"] += 0.35
+                p["vida"] -= 1
+                if p["vida"] > 0:
+                    vivas.append(p)
+            self.particulas_frijol = vivas
+            cambio = True
+        if cambio:
+            self.update()

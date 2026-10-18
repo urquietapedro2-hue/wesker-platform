@@ -14,19 +14,42 @@ FASES = {"REPOSO": "En reposo", "ABRIENDO": "Abriendo silo", "VERTIDO": "Vertien
          "BARRIDO_CIERRE": "Cerrando silo"}
 ESTACION1 = {"STANDBY": "Lista", "DISPENSING": "Soltando vaso", "SIN_VASOS": "Sin vasos"}
 SILOS = [("Silo negro", 0), ("Silo pinto", 1), ("Silo peruano", 2)]
+NODO = "ALBERT-01"
+PUBLICAR_CADA = 0.5  # segundos entre envíos al publicar
 
 
 class AlbertPage(QtWidgets.QWidget):
     """Gemelo de Albert (dosificadora) con su panel de estado y simulación."""
 
-    def __init__(self, role, auditar):
+    NODO = NODO
+
+    def __init__(self, role, auditar, sync=None):
         super().__init__()
-        self.role, self.auditar = role, auditar
+        self.role, self.auditar, self.sync = role, auditar, sync
         self.sim = AlbertSimulator()
         self._ultimo = time.monotonic()
+        self._acum_pub = 0.0
+        self._publicador = ""
 
         self.twin = AlbertDigitalTwin(self)
         self.twin.alerta_silo_vacio.connect(self._silo_vacio)
+
+        self.fuente = QtWidgets.QComboBox()
+        if sync:
+            self.fuente.addItem("Ver la planta (compartido)", "VER")
+        if sync and puede_controlar(role):
+            self.fuente.addItem("Publicar mi simulación", "PUBLICAR")
+        if puede_controlar(role) or not sync:
+            self.fuente.addItem("Local (solo en esta PC)", "LOCAL")
+        self._fuente = self.fuente.itemData(0)
+        self.twin.espejo = self._fuente == "VER"
+        self.lbl_fuente = QtWidgets.QLabel("")
+        self.lbl_fuente.setWordWrap(True)
+        self.lbl_fuente.setObjectName("muted")
+        caja_fuente = QtWidgets.QGroupBox("Fuente de datos")
+        fl = QtWidgets.QVBoxLayout(caja_fuente)
+        fl.addWidget(self.fuente)
+        fl.addWidget(self.lbl_fuente)
 
         estado, self.v = grupo_valores("Estado en vivo", [
             ("modo", "Modo"), ("terminados", "Vasos terminados"), ("silo", "Vasos en el silo"),
@@ -84,7 +107,7 @@ class AlbertPage(QtWidgets.QWidget):
 
         panel = QtWidgets.QWidget()
         pl = QtWidgets.QVBoxLayout(panel)
-        for w in (estado, simulacion, self.manual, self.lbl_alerta, self.lbl_rol):
+        for w in (caja_fuente, estado, simulacion, self.manual, self.lbl_alerta, self.lbl_rol):
             pl.addWidget(w)
         pl.addStretch(1)
 
@@ -105,19 +128,86 @@ class AlbertPage(QtWidgets.QWidget):
         self.btn_reset.clicked.connect(lambda _c: self.twin.reset_contador())
 
         self._aplicar_permisos()
+        self._texto_fuente()
+        self.fuente.currentIndexChanged.connect(self._cambiar_fuente)
+        if sync:
+            sync.estado.connect(self._on_estado)
+            sync.senal.connect(self._on_senal)
+            sync.error.connect(self._on_error_sync)
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(200)
 
+    @property
+    def publicando(self):
+        return self._fuente == "PUBLICAR"
+
     def _aplicar_permisos(self):
-        ok = puede_controlar(self.role)
+        ok = puede_controlar(self.role) and self._fuente != "VER"
         auto = self.modo.currentData() == "AUTO"
         for w in (self.btn_inicio, self.modo, self.receta, self.periodo, self.chk_recarga, self.btn_recarga, self.btn_reset):
             w.setEnabled(ok)
         self.btn_paso.setEnabled(ok and not auto)
         self.manual.setEnabled(ok and not auto)
 
+    def _texto_fuente(self):
+        if self._fuente == "VER":
+            txt = (f"Viendo la planta. Publica: {self._publicador}." if self._publicador
+                   else "Sin señal: nadie publica este nodo todavía.")
+        elif self._fuente == "PUBLICAR":
+            txt = "Publicando: todos ven tu simulación."
+        else:
+            txt = "Local: lo que hagas aquí no lo ve nadie."
+        self.lbl_fuente.setText(txt)
+
+    def _cambiar_fuente(self):
+        nueva, anterior = self.fuente.currentData(), self._fuente
+        if nueva == anterior:
+            return
+        if anterior == "PUBLICAR":
+            self._soltar()
+        if self.sim.activo:
+            self._alternar()
+        self._fuente = nueva
+        self.twin.espejo = nueva == "VER"
+        if nueva == "PUBLICAR":
+            self._acum_pub = PUBLICAR_CADA  # publica enseguida
+            self.auditar("PUBLICAR_INICIAR", {"nodo": NODO})
+        self._aplicar_permisos()
+        self._texto_fuente()
+
+    def _soltar(self):
+        if self.sync:
+            self.sync.liberar(NODO)
+        self.auditar("PUBLICAR_DETENER", {"nodo": NODO})
+
+    def _error_publicar(self, msg):
+        if msg.startswith("OCUPADO"):
+            quien = msg.split(":", 1)[1] if ":" in msg else "otra persona"
+            self.fuente.setCurrentIndex(0)  # vuelve a «Ver la planta»
+            self.lbl_fuente.setText(f"{quien} ya publica este nodo. Pasaste a ver la planta.")
+        else:
+            self.lbl_fuente.setText(f"No se pudo publicar: {msg}")
+
+    def _on_estado(self, nodo, estado, _publicador):
+        if nodo != NODO or self._fuente != "VER":
+            return
+        self.twin.importar_estado(estado)
+        self.lbl_proximo.setText(f"Próximo paso en {estado.get('restante', 0):.0f} s" if estado.get("corriendo") else "")
+
+    def _on_senal(self, nodo, publicador):
+        if nodo == NODO:
+            self._publicador = publicador
+            if self._fuente == "VER":
+                self._texto_fuente()
+
+    def _on_error_sync(self, msg):
+        if self._fuente == "VER":
+            self.lbl_fuente.setText(f"Estado compartido no disponible: {msg}")
+
     def _alternar(self):
+        if self._fuente == "VER":
+            return
         if self.sim.activo:
             self.sim.detener()
             self.btn_inicio.setText("Iniciar simulación")
@@ -149,12 +239,20 @@ class AlbertPage(QtWidgets.QWidget):
         ahora = time.monotonic()
         dt, self._ultimo = ahora - self._ultimo, ahora
         auto = self.modo.currentData() == "AUTO"
-        if auto:
+        ver = self._fuente == "VER"
+        if auto and not ver:
             for _ in range(self.sim.tick(dt)):
                 self.twin.animar_rotacion()
         t, v = self.twin, self.v
-        if self.chk_recarga.isChecked() and t.estado_estacion1 == "SIN_VASOS":
+        if not ver and self.chk_recarga.isChecked() and t.estado_estacion1 == "SIN_VASOS":
             self._recargar()
+        if self._fuente == "PUBLICAR" and self.sync:
+            self._acum_pub += dt
+            if self._acum_pub >= PUBLICAR_CADA:
+                self._acum_pub = 0.0
+                estado = t.exportar_estado()
+                estado.update({"corriendo": self.sim.activo, "restante": round(self.sim.restante)})
+                self.sync.publicar(NODO, estado, self._error_publicar)
         v["modo"].setText("Automático" if t.modo_operacion == "AUTO" else "Manual")
         v["terminados"].setText(str(t.vasos_terminados))
         v["silo"].setText(f"{t.vasos_en_silo} de 4")
@@ -162,4 +260,5 @@ class AlbertPage(QtWidgets.QWidget):
         v["tolva"].setText(f"{t.nivel_tolva:.0f} %")
         v["dosif"].setText(FASES.get(t.fase_dosif, t.fase_dosif))
         v["sensores"].setText(marcas([t.sensor_fc51_e1, t.sensor_fc51_e2, t.sensor_fc51_e3, t.sensor_ky032_tolva]))
-        self.lbl_proximo.setText(f"Próximo paso en {self.sim.restante:.0f} s" if (auto and self.sim.activo) else "")
+        if not ver:
+            self.lbl_proximo.setText(f"Próximo paso en {self.sim.restante:.0f} s" if (auto and self.sim.activo) else "")

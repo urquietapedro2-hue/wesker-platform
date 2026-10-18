@@ -11,19 +11,42 @@ DIRECCIONES = {"F": "Adelante", "B": "Atrás", "L": "Izquierda", "R": "Derecha",
                "FL": "Adelante-izquierda", "FR": "Adelante-derecha", "BL": "Atrás-izquierda",
                "BR": "Atrás-derecha", "ESTACION": "En estación"}
 SENSORES_CENTRO = [0, 0, 1, 0, 0]
+NODO = "ZENO-01"
+PUBLICAR_CADA = 0.5  # segundos entre envíos al publicar
 
 
 class ZenoPage(QtWidgets.QWidget):
     """Gemelo de Zeno (AGV) con su panel de telemetría y simulación."""
 
-    def __init__(self, role, auditar):
+    NODO = NODO
+
+    def __init__(self, role, auditar, sync=None):
         super().__init__()
-        self.role, self.auditar = role, auditar
+        self.role, self.auditar, self.sync = role, auditar, sync
         self.sim = ZenoSimulator()
         self.corriendo = False
         self._ultimo = time.monotonic()
+        self._acum_pub = 0.0
+        self._publicador = ""
+        self._seg_remoto = ""
 
         self.twin = ZenoDigitalTwin(self)
+
+        self.fuente = QtWidgets.QComboBox()
+        if sync:
+            self.fuente.addItem("Ver la planta (compartido)", "VER")
+        if sync and puede_controlar(role):
+            self.fuente.addItem("Publicar mi simulación", "PUBLICAR")
+        if puede_controlar(role) or not sync:
+            self.fuente.addItem("Local (solo en esta PC)", "LOCAL")
+        self._fuente = self.fuente.itemData(0)
+        self.lbl_fuente = QtWidgets.QLabel("")
+        self.lbl_fuente.setWordWrap(True)
+        self.lbl_fuente.setObjectName("muted")
+        caja_fuente = QtWidgets.QGroupBox("Fuente de datos")
+        fl = QtWidgets.QVBoxLayout(caja_fuente)
+        fl.addWidget(self.fuente)
+        fl.addWidget(self.lbl_fuente)
 
         estado, self.v = grupo_valores("Telemetría en vivo", [
             ("modo", "Modo"), ("dir", "Dirección"), ("pwm", "Potencia"), ("dist", "Distancia frontal"),
@@ -72,7 +95,7 @@ class ZenoPage(QtWidgets.QWidget):
 
         panel = QtWidgets.QWidget()
         pl = QtWidgets.QVBoxLayout(panel)
-        for w in (estado, simulacion, self.manual, self.lbl_rol):
+        for w in (caja_fuente, estado, simulacion, self.manual, self.lbl_rol):
             pl.addWidget(w)
         pl.addStretch(1)
 
@@ -90,22 +113,90 @@ class ZenoPage(QtWidgets.QWidget):
         self.btn_reinicio.clicked.connect(self._reiniciar)
 
         self._aplicar_permisos()
+        self._texto_fuente()
+        self.fuente.currentIndexChanged.connect(self._cambiar_fuente)
+        if sync:
+            sync.estado.connect(self._on_estado)
+            sync.senal.connect(self._on_senal)
+            sync.error.connect(self._on_error_sync)
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(100)
 
+    @property
+    def publicando(self):
+        return self._fuente == "PUBLICAR"
+
     def _aplicar_permisos(self):
-        ok = puede_controlar(self.role)
+        ok = puede_controlar(self.role) and self._fuente != "VER"
         auto = self.modo.currentData() == "AUTO"
         for w in (self.btn_inicio, self.modo, self.vel, self.btn_reinicio):
             w.setEnabled(ok)
         self.btn_obstaculo.setEnabled(ok and auto)
         self.manual.setEnabled(ok and not auto)
 
+    def _texto_fuente(self):
+        if self._fuente == "VER":
+            txt = (f"Viendo la planta. Publica: {self._publicador}." if self._publicador
+                   else "Sin señal: nadie publica este nodo todavía.")
+        elif self._fuente == "PUBLICAR":
+            txt = "Publicando: todos ven tu simulación."
+        else:
+            txt = "Local: lo que hagas aquí no lo ve nadie."
+        self.lbl_fuente.setText(txt)
+
+    def _cambiar_fuente(self):
+        nueva, anterior = self.fuente.currentData(), self._fuente
+        if nueva == anterior:
+            return
+        if anterior == "PUBLICAR":
+            self._soltar()
+        if self.corriendo:
+            self._alternar()
+        self._fuente = nueva
+        if nueva == "PUBLICAR":
+            self._acum_pub = PUBLICAR_CADA
+            self.auditar("PUBLICAR_INICIAR", {"nodo": NODO})
+        self._aplicar_permisos()
+        self._texto_fuente()
+
+    def _soltar(self):
+        if self.sync:
+            self.sync.liberar(NODO)
+        self.auditar("PUBLICAR_DETENER", {"nodo": NODO})
+
+    def _error_publicar(self, msg):
+        if msg.startswith("OCUPADO"):
+            quien = msg.split(":", 1)[1] if ":" in msg else "otra persona"
+            self.fuente.setCurrentIndex(0)
+            self.lbl_fuente.setText(f"{quien} ya publica este nodo. Pasaste a ver la planta.")
+        else:
+            self.lbl_fuente.setText(f"No se pudo publicar: {msg}")
+
+    def _on_estado(self, nodo, e, _publicador):
+        if nodo != NODO or self._fuente != "VER":
+            return
+        self.twin.set_modo(e.get("modo", "AUTO"))
+        self.twin.set_telemetria(e.get("dir", "S"), e.get("pwm", 0), e.get("dist", 85.0), e.get("sens"),
+                                 e.get("sub", "SEGUIMIENTO"), e.get("qr", "NINGUNO"))
+        self._seg_remoto = e.get("seg", "")
+
+    def _on_senal(self, nodo, publicador):
+        if nodo == NODO:
+            self._publicador = publicador
+            if self._fuente == "VER":
+                self._texto_fuente()
+
+    def _on_error_sync(self, msg):
+        if self._fuente == "VER":
+            self.lbl_fuente.setText(f"Estado compartido no disponible: {msg}")
+
     def _parar_twin(self):
         self.twin.set_telemetria("S", 0, 85.0, [0, 0, 0, 0, 0])
 
     def _alternar(self):
+        if self._fuente == "VER":
+            return
         if self.corriendo:
             self.corriendo = False
             self.btn_inicio.setText("Iniciar recorrido")
@@ -138,14 +229,25 @@ class ZenoPage(QtWidgets.QWidget):
         ahora = time.monotonic()
         dt, self._ultimo = ahora - self._ultimo, ahora
         auto = self.modo.currentData() == "AUTO"
-        if self.corriendo and auto:
+        ver = self._fuente == "VER"
+        if self.corriendo and auto and not ver:
             self.twin.set_telemetria(**self.sim.tick(dt, self.vel.value() / 100.0))
         t, v = self.twin, self.v
+        if self._fuente == "PUBLICAR" and self.sync:
+            self._acum_pub += dt
+            if self._acum_pub >= PUBLICAR_CADA:
+                self._acum_pub = 0.0
+                tramo = self.sim.segmento if (self.corriendo and auto) else ""
+                self.sync.publicar(NODO, {"modo": t.modo, "dir": t.direccion, "pwm": t.velocidad_pwm,
+                                          "dist": t.distancia_frontal, "sens": [int(x) for x in t.sensores_linea],
+                                          "sub": t.subestado, "qr": t.estacion_qr, "seg": tramo,
+                                          "corriendo": self.corriendo}, self._error_publicar)
         v["modo"].setText("Automático" if t.modo == "AUTO" else "Manual")
         v["dir"].setText(DIRECCIONES.get(t.direccion, t.direccion))
         v["pwm"].setText(f"{t.velocidad_pwm} %")
         v["dist"].setText(f"{t.distancia_frontal:.0f} cm")
         v["sub"].setText(t.subestado)
         v["qr"].setText(t.estacion_qr)
-        v["seg"].setText(self.sim.segmento if (self.corriendo and auto) else "—")
+        tramo_vivo = self._seg_remoto if ver else (self.sim.segmento if (self.corriendo and auto) else "")
+        v["seg"].setText(tramo_vivo or "—")
         v["sens"].setText(marcas(t.sensores_linea))
