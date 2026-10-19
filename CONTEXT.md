@@ -2,13 +2,24 @@
 
 Archivo de relevo entre IAs (Claude / Gemini) y personas. Se actualiza después de cada cambio que funcione.
 
-## Estado actual: v1.2.0 (gemelos compartidos)
+## Estado actual: v1.3.0 (identidad visual propia + endurecimiento)
 Escritorio PyQt5 + app web (docs/) + nube Supabase. El instalador se compila en GitHub Actions al subir una etiqueta v*.
 
 ### Pantallas del escritorio (menú lateral)
 - **Conectados**: sesiones activas (nube). Sin cambios de comportamiento.
 - **Albert (dosificadora)**: gemelo portado del proyecto original + panel con estado, recetas, modo manual/automático y simulación.
 - **Zeno (AGV)**: gemelo portado + telemetría, recorrido simulado, obstáculo y control manual.
+
+### Identidad visual y seguridad (v1.3.0)
+- **Marca propia, sin material de terceros.** Los fondos originales traían el emblema de Umbrella Corporation (marca de Capcom) y NO deben subirse al repo público ni al instalador. Todo se genera por código: `scripts/generar_marca.py` (logos W.E.S.K.E.R. y V.E.R.A. en SVG/PNG + `wesker.ico`) y `scripts/generar_fondos.py` (metal oscuro + marco HUD, acento por pantalla). Los resultados viven en `desktop/assets/`.
+- Significado de las siglas (para textos y futuros diseños): **W.E.S.K.E.R.** = Wireless Environment for Synchronized Kernel Execution & Routing (plataforma central). **V.E.R.A.** = Virtual Entity for Reasoning and Assistance (asistente virtual, futura IA).
+- `scripts/optimizar_fondos.py --origen X --destino Y` convierte imágenes a JPEG RGB, con ancho máximo y peso máximo dinámicos (baja la calidad hasta 40 y luego reduce el tamaño). Pillow es solo para scripts; NO va en requirements.txt.
+- Hoy solo la pantalla de inicio de sesión usa el fondo; las demás pantallas lo usarán al rediseñar paneles (versión Planta). Los 6 fondos ya están listos en `desktop/assets/fondos/`.
+- `ui/branding.py` carga los recursos y, si falta uno, la app sigue sin él. **Para que viajen en el instalador** el workflow necesita `--add-data "desktop/assets;assets" --icon "desktop/assets/wesker.ico"` (cambio mínimo en release.yml, que es archivo intocable: se aplica con aprobación del dueño).
+- `core/estado.py`: todo estado recibido de la nube se valida (tipo, rango, valores permitidos) antes de tocar un gemelo; lo inválido se descarta. Un publicador defectuoso o malicioso ya no puede romper las pantallas de los demás.
+- `supabase/03_endurecimiento.sql` (opcional, recomendado): usuarios nuevos inactivos hasta que un Admin los active, y límite de 30 intentos fallidos/minuto en la bitácora.
+- Pruebas de seguridad automáticas (`tests/test_seguridad.py`): ningún token, llave privada ni `service_role`; `app_config.json` solo con datos públicos; **ninguna IP fija en el código** (regla: las IPs vivirán en Supabase).
+- Regla de trabajo: credenciales solo por variables de entorno (`.env`, ignorado por git) y solo del lado servidor; la URL y la clave `anon` de Supabase son públicas por diseño y van en `app_config.json`.
 
 ### Gemelos compartidos (v1.2.0)
 - Cada gemelo tiene una **fuente**: *Ver la planta* (por defecto), *Publicar mi simulación* (ADMIN/OPERATOR/MAINTENANCE) o *Local*. El VIEWER solo ve.

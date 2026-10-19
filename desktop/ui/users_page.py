@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 COLUMNAS = ["Nombre", "Rol", "Cliente", "Versión", "Visto"]
 
@@ -18,6 +18,7 @@ class UsersPage(QtWidgets.QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(QtWidgets.QLabel("Conectados ahora"))
         self.tabla = QtWidgets.QTableWidget(0, len(COLUMNAS))

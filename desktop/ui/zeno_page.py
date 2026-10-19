@@ -2,6 +2,7 @@ import time
 
 from PyQt5 import QtCore, QtWidgets
 
+from core.estado import sanear_zeno
 from core.permissions import nota_rol, puede_controlar
 from core.sim import ZenoSimulator
 from ui.panel import grupo_valores, marcas, scroll
@@ -22,6 +23,7 @@ class ZenoPage(QtWidgets.QWidget):
 
     def __init__(self, role, auditar, sync=None):
         super().__init__()
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.role, self.auditar, self.sync = role, auditar, sync
         self.sim = ZenoSimulator()
         self.corriendo = False
@@ -176,10 +178,14 @@ class ZenoPage(QtWidgets.QWidget):
     def _on_estado(self, nodo, e, _publicador):
         if nodo != NODO or self._fuente != "VER":
             return
-        self.twin.set_modo(e.get("modo", "AUTO"))
-        self.twin.set_telemetria(e.get("dir", "S"), e.get("pwm", 0), e.get("dist", 85.0), e.get("sens"),
-                                 e.get("sub", "SEGUIMIENTO"), e.get("qr", "NINGUNO"))
-        self._seg_remoto = e.get("seg", "")
+        t = sanear_zeno(e)  # lo publica otra persona: nunca se aplica sin validar
+        try:
+            self.twin.set_modo(t["modo"])
+            self.twin.set_telemetria(t["direccion"], t["velocidad"], t["distancia"], t["sensores"], t["subestado"], t["qr"])
+        except Exception as ex:  # datos ajenos nunca deben romper la pantalla
+            self.lbl_fuente.setText(f"No se pudo aplicar el estado recibido ({type(ex).__name__}).")
+            return
+        self._seg_remoto = t["tramo"]
 
     def _on_senal(self, nodo, publicador):
         if nodo == NODO:

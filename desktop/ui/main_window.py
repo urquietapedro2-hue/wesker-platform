@@ -3,6 +3,7 @@ from PyQt5 import QtCore, QtWidgets
 from core import updater
 from core.shared import EstadoCompartido
 from core.version import __version__
+from ui import branding
 from ui.albert_page import AlbertPage
 from ui.common import UpdateBanner, run_async
 from ui.shared_sync import Sincronizador
@@ -29,6 +30,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._busy, self._bloqueada = False, False
         p = client.profile
         self.setWindowTitle(f"WESKER {__version__}")
+        self.setWindowIcon(branding.icono())
         self.resize(1180, 760)
         self.setStyleSheet(EXTRA_STYLE)
 
@@ -36,6 +38,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(root)
         lay = QtWidgets.QVBoxLayout(root)
         top = QtWidgets.QHBoxLayout()
+        pm = branding.pixmap("wesker_logo.png", 34)
+        if pm is not None:
+            logo = QtWidgets.QLabel()
+            logo.setPixmap(pm)
+            logo.setToolTip("W.E.S.K.E.R.: Wireless Environment for Synchronized Kernel Execution & Routing")
+            top.addWidget(logo)
         quien = QtWidgets.QLabel(f"{p.get('nombre') or p['email']}")
         quien.setStyleSheet("font-size:18px;font-weight:600")
         rol = QtWidgets.QLabel(f"Rol: {p['role']}")

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Logo W.E.S.K.E.R.">
+  <title>W.E.S.K.E.R.</title>
+  <polygon points="128.0,16.0 225.0,72.0 225.0,184.0 128.0,240.0 31.0,184.0 31.0,72.0" fill="#0b1220" fill-opacity="0.55" stroke="#38BDF8" stroke-width="6" stroke-linejoin="round"/>
+  <polygon points="128.0,27.2 215.3,77.6 215.3,178.4 128.0,228.8 40.7,178.4 40.7,77.6" fill="none" stroke="#38BDF8" stroke-opacity="0.35" stroke-width="2" stroke-linejoin="round"/>
+  <polyline points="68.0,88.0 98.0,172.0 128.0,108.0 158.0,172.0 188.0,88.0" fill="none" stroke="#E2E8F0" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="68" cy="88" r="9" fill="#38BDF8"/><circle cx="98" cy="172" r="9" fill="#38BDF8"/><circle cx="158" cy="172" r="9" fill="#38BDF8"/><circle cx="188" cy="88" r="9" fill="#38BDF8"/>
+  <circle cx="128" cy="108" r="21" fill="none" stroke="#38BDF8" stroke-width="3" stroke-opacity="0.8"/>
+  <circle cx="128" cy="108" r="12" fill="#E2E8F0" stroke="#38BDF8" stroke-width="4"/>
+  <line x1="106" y1="206" x2="150" y2="206" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" stroke-opacity="0.7"/>
+</svg>

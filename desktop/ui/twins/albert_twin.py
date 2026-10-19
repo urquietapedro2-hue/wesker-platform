@@ -8,7 +8,7 @@ SISTEMA: CELDA AUTOMATIZADA DE DOSIFICACIÓN, TAPADO Y SELLADO TÉRMICO
          - CORRECCIÓN Z-INDEX: TAPAS Y PRENSA EN CAPA SUPERIOR (OVERLAY)
          - REPOSICIONAMIENTO ANGULAR DE ESTACIÓN 2.5 (315° EN CÍRCULO EXTERIOR)
          - RENDERIZADO DE TAPA NEGRA INDUSTRIAL CON RELIEVE SOBRE ENVASE
-         - CONEXIÓN TCP CON NODOS ESP32 (192.168.1.17 Y 192.168.1.180)
+         - CONEXIÓN TCP CON NODOS ESP32 (las direcciones se leerán del registro de nodos, nunca del código)
 ====================================================================
 """
 

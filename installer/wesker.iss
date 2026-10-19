@@ -12,6 +12,8 @@ OutputDir=..\dist_installer
 OutputBaseFilename=WESKER-Setup
 Compression=lzma2
 SolidCompression=yes
+SetupIconFile=..\desktop\assets\wesker.ico
+UninstallDisplayIcon={app}\WESKER.exe
 CloseApplications=yes
 RestartApplications=yes
 

@@ -20,7 +20,7 @@ jobs:
           echo "VERSION=$V" >> "$GITHUB_ENV"
       - run: pip install -r requirements.txt pyinstaller==6.11.1
       - name: Compilar
-        run: pyinstaller --noconfirm --windowed --name WESKER --add-data "desktop/app_config.json;." desktop/main.py
+        run: pyinstaller --noconfirm --windowed --name WESKER --add-data "desktop/app_config.json;." --add-data "desktop/assets;assets" --icon "desktop/assets/wesker.ico" desktop/main.py
       - name: Prueba de humo (el .exe abre y la ventana sigue viva)
         timeout-minutes: 2
         shell: pwsh

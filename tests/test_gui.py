@@ -40,10 +40,16 @@ class ClienteFalso:
 class CompartidoFalso:
     """Hace de nube: devuelve un estado de Zeno publicado por 'Pedro' y registra lo que se publica."""
 
-    def __init__(self):
-        self.publicados, self.liberados, self._entregado = [], [], False
+    def __init__(self, hostil=False):
+        self.publicados, self.liberados, self._entregado, self.hostil = [], [], False, hostil
 
     def leer(self):
+        if self.hostil:
+            basura = {"modo": {"x": 1}, "dir": ["F"], "pwm": "abc", "dist": float("nan"), "sens": "no", "sub": 5, "qr": None,
+                      "silo": "abc", "ang_obj": "x", "tolva": None, "slots": [1, 2], "fase": "HACKEADO"}
+            primero, self._entregado = not self._entregado, True
+            return {n: {"version": 1, "publicador": "Intruso", "cambio": primero, "estado": basura if primero else None}
+                    for n in ("ZENO-01", "ALBERT-01")}
         estado = {"modo": "AUTO", "dir": "L", "pwm": 45, "dist": 85.0, "sens": [1, 1, 0, 0, 0],
                   "sub": "SEGUIMIENTO", "qr": "NINGUNO", "seg": "curva izquierda", "corriendo": True}
         primero, self._entregado = not self._entregado, True
@@ -64,9 +70,9 @@ class TestVentanas(unittest.TestCase):
     def setUpClass(cls):
         cls.qt = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
-    def _abrir(self, role):
+    def _abrir(self, role, hostil=False):
         from ui.main_window import MainWindow
-        cliente, nube = ClienteFalso(role), CompartidoFalso()
+        cliente, nube = ClienteFalso(role), CompartidoFalso(hostil)
         with patch("core.updater.check_latest", return_value=None):
             win = MainWindow(cliente, {"github_repo": "x/y"}, on_logout=lambda: None, shared=nube)
         win.show()
@@ -132,6 +138,28 @@ class TestVentanas(unittest.TestCase):
         self.assertIn("PUBLICAR_INICIAR", cliente.eventos)
         self._cerrar(win)
         self.assertIn("ZENO-01", win.nube.liberados)
+
+    def test_estado_hostil_no_rompe_la_pantalla(self):
+        win, _ = self._abrir("VIEWER", hostil=True)
+        self._bombear(1.8)
+        self.assertEqual(win.zeno.twin.velocidad_pwm, 0)       # telemetría segura por defecto
+        self.assertEqual(win.zeno.twin.direccion, "S")
+        self.assertIn("no válido", win.albert.lbl_fuente.text())
+        self._cerrar(win)
+
+    def test_login_se_abre_con_logo_y_fondo(self):
+        from core.config import load_config
+        from ui.login_window import LoginWindow
+        ventana = LoginWindow(ClienteFalso("VIEWER"), {"github_repo": "x/y", "supabase_url": "https://ejemplo.invalid"},
+                              on_success=lambda: None)
+        ventana.show()
+        self._bombear(0.3)
+        self.assertTrue(ventana.isVisible())
+        self.assertIsNotNone(ventana._fondo)  # el fondo propio se cargó desde assets/
+        self.assertFalse(ventana.windowIcon().isNull())
+        ventana.close()
+        for w in list(getattr(ventana, "_workers", [])) + list(getattr(ventana.banner, "_workers", [])):
+            w.wait(5000)
 
     def test_visor_solo_observa(self):
         win, _ = self._abrir("VIEWER")

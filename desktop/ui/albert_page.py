@@ -2,6 +2,7 @@ import time
 
 from PyQt5 import QtCore, QtWidgets
 
+from core.estado import sanear_albert
 from core.permissions import nota_rol, puede_controlar
 from core.sim import AlbertSimulator
 from ui.panel import grupo_valores, marcas, scroll
@@ -25,6 +26,7 @@ class AlbertPage(QtWidgets.QWidget):
 
     def __init__(self, role, auditar, sync=None):
         super().__init__()
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.role, self.auditar, self.sync = role, auditar, sync
         self.sim = AlbertSimulator()
         self._ultimo = time.monotonic()
@@ -192,8 +194,16 @@ class AlbertPage(QtWidgets.QWidget):
     def _on_estado(self, nodo, estado, _publicador):
         if nodo != NODO or self._fuente != "VER":
             return
-        self.twin.importar_estado(estado)
-        self.lbl_proximo.setText(f"Próximo paso en {estado.get('restante', 0):.0f} s" if estado.get("corriendo") else "")
+        limpio = sanear_albert(estado)  # lo publica otra persona: nunca se aplica sin validar
+        if not limpio:
+            self.lbl_fuente.setText("Se recibió un estado no válido y se ignoró.")
+            return
+        try:
+            self.twin.importar_estado(limpio)
+        except Exception as ex:  # datos ajenos nunca deben romper la pantalla
+            self.lbl_fuente.setText(f"No se pudo aplicar el estado recibido ({type(ex).__name__}).")
+            return
+        self.lbl_proximo.setText(f"Próximo paso en {limpio.get('restante', 0):.0f} s" if limpio.get("corriendo") else "")
 
     def _on_senal(self, nodo, publicador):
         if nodo == NODO:

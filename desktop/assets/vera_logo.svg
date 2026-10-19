@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Logo V.E.R.A.">
+  <title>V.E.R.A.</title>
+  <circle cx="128" cy="128" r="86" fill="none" stroke="#A78BFA" stroke-opacity="0.35" stroke-width="2"/>
+  <circle cx="128" cy="128" r="62" fill="#14102a" stroke="#A78BFA" stroke-width="3"/>
+  <path d="M234.4 146.8 A108 108 0 0 1 146.8 234.4" fill="none" stroke="#A78BFA" stroke-width="6" stroke-linecap="round"/><path d="M109.2 234.4 A108 108 0 0 1 21.6 146.8" fill="none" stroke="#A78BFA" stroke-width="6" stroke-linecap="round"/><path d="M21.6 109.2 A108 108 0 0 1 109.2 21.6" fill="none" stroke="#A78BFA" stroke-width="6" stroke-linecap="round"/><path d="M146.8 21.6 A108 108 0 0 1 234.4 109.2" fill="none" stroke="#A78BFA" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="236.0" cy="128.0" r="5" fill="#A78BFA"/><circle cx="128.0" cy="236.0" r="5" fill="#A78BFA"/><circle cx="20.0" cy="128.0" r="5" fill="#A78BFA"/><circle cx="128.0" cy="20.0" r="5" fill="#A78BFA"/>
+  <rect x="78" y="115.0" width="10" height="26" rx="5" fill="#A78BFA"/><rect x="93" y="106.0" width="10" height="44" rx="5" fill="#A78BFA"/><rect x="108" y="97.0" width="10" height="62" rx="5" fill="#A78BFA"/><rect x="123" y="86.0" width="10" height="84" rx="5" fill="#EDE9FE"/><rect x="138" y="97.0" width="10" height="62" rx="5" fill="#A78BFA"/><rect x="153" y="106.0" width="10" height="44" rx="5" fill="#A78BFA"/><rect x="168" y="115.0" width="10" height="26" rx="5" fill="#A78BFA"/>
+</svg>
