@@ -2,13 +2,29 @@
 
 Archivo de relevo entre IAs (Claude / Gemini) y personas. Se actualiza después de cada cambio que funcione.
 
-## Estado actual: v1.3.0 (identidad visual propia + endurecimiento)
+## Estado actual: v1.4.0 (HMI + audio de eventos + V.E.R.A. independiente)
 Escritorio PyQt5 + app web (docs/) + nube Supabase. El instalador se compila en GitHub Actions al subir una etiqueta v*.
 
 ### Pantallas del escritorio (menú lateral)
 - **Conectados**: sesiones activas (nube). Sin cambios de comportamiento.
 - **Albert (dosificadora)**: gemelo portado del proyecto original + panel con estado, recetas, modo manual/automático y simulación.
 - **Zeno (AGV)**: gemelo portado + telemetría, recorrido simulado, obstáculo y control manual.
+
+### V.E.R.A. 0.2.0: secretos cifrados y diagnóstico (se publica con `git push`, sin etiqueta: V.E.R.A. no va en el instalador)
+- Problema reportado: la voz de ElevenLabs no sonaba y la consola no mostraba errores. Causa del silencio: V.E.R.A. 0.1 no imprimía nada por evento y guardaba los fallos del proveedor solo en `ultimo_error`; además, si el `.env` no se leía, el motor caía en silencio a `silencioso` sin avisar. La causa concreta en la máquina del usuario NO estaba identificada al entregar esta versión: la determina `python -m vera --diagnostico`.
+- Ahora: cada evento y cada error salen en consola (`logging`, sin secretos); aviso explícito si el motor es `silencioso`; los eventos omitidos por enfriamiento también se registran; el adaptador de ElevenLabs muestra lo que responde el proveedor (HTTP + estado + mensaje, con la clave eliminada).
+- `vera/secretos.py`: almacén cifrado con DPAPI de Windows (`%APPDATA%\WESKER\vera_secretos.dat`), atado a la cuenta de Windows, sin contraseña y sin dependencias. SIN PROBAR en Windows real (aquí solo se probó la lógica con un cifrador falso). Comandos: `--guardar-secretos`, `--migrar-env` (verifica que descifra ANTES de destruir el .env), `--borrar-secretos`, `--diagnostico`.
+- `vera/config.py`: prioridad entorno > almacén > `.env` > defecto, con registro de ORIGEN de cada dato; lee `.env` en UTF-8, UTF-8 con BOM y UTF-16 (PowerShell).
+- `scripts/verificar_secretos.py`: bloquea commits con `.env`, claves (Telegram, ElevenLabs, Supabase service_role, llaves privadas); `--instalar-hook` lo conecta a git; probado con un repositorio real.
+- ALERTA: el proyecto del usuario vive dentro de OneDrive (`...\OneDrive\Escritorio\wesker-platform`): un `.env` allí ya se sincronizó a la nube. La clave de ElevenLabs debe rotarse después de migrar.
+
+### HMI, audio y V.E.R.A. (v1.4.0)
+- **HMI**: `ui/hmi.py` (barra de estado con logo, estado de la planta, nodos EN LÍNEA/SIN SEÑAL, nube, reloj, usuario; registro de eventos de la sesión; fondo propio; hoja de estilos con botones grandes). F11 = pantalla completa (letra y botones más grandes, para pantalla táctil); Esc sale. «En línea» significa que alguien publica ese nodo (simulación hoy, hardware mañana). El historial compartido y permanente llega con la pantalla Planta.
+- `MainWindow.evento(nivel, texto, codigo, nodo)` es el punto único de eventos: registro visible + sonido (si es error) + aviso a V.E.R.A. (si hay código). Anti-repetición de 5 s; las alertas de nodo/nube se disparan solo al CAMBIAR de estado.
+- **Audio**: `core/audio_eventos.py` (lógica sin Qt) y `ui/audio.py` (QSoundEffect para WAV, QMediaPlayer para MP3/OGG; QtMultimedia se carga al primer uso). Eventos: `login_ok`, `login_fallo`, `error_sistema`. Búsqueda: `%APPDATA%\WESKER\sonidos\` > `desktop\assets\sonidos\` > `desktop\assets\sonidos\base\` (tonos de ejemplo propios, `scripts/generar_sonidos_base.py`). Preferencias en `%APPDATA%\WESKER\preferencias.json`. `WESKER_SIN_AUDIO=1` silencia (pruebas/CI). Diagnóstico en `%APPDATA%\WESKER\audio.log`. SIN PROBAR en el .exe real.
+- Icono: `ui/branding.py` fija el AppUserModelID de Windows (icono correcto en la barra de tareas); el icono del .exe sale de `--icon` en release.yml.
+- **V.E.R.A.** vive en `vera/` como paquete independiente (su propio requirements, pruebas y README). El HMI solo conoce el contrato `vera/CONTRATO.md` mediante `core/vera_cliente.py` (HTTP local, en segundo plano, silencioso si V.E.R.A. no corre; una prueba impide que `desktop/` importe código de `vera/`). Puerto de voz `MotorVoz`; adaptador de ElevenLabs sin probar con una cuenta real; sin voz por defecto (`VERA_MOTOR=silencioso`).
+- **Voz «Dalia»**: en el proyecto original era la voz sintética de Microsoft `es-MX-DaliaNeural` (edge-tts), NO una persona. Clonar una voz exige consentimiento de su dueño y el proveedor lo verifica. Decisión pendiente del dueño del proyecto: voz propia con consentimiento, voz de la biblioteca del proveedor o voz diseñada.
 
 ### Identidad visual y seguridad (v1.3.0)
 - **Marca propia, sin material de terceros.** Los fondos originales traían el emblema de Umbrella Corporation (marca de Capcom) y NO deben subirse al repo público ni al instalador. Todo se genera por código: `scripts/generar_marca.py` (logos W.E.S.K.E.R. y V.E.R.A. en SVG/PNG + `wesker.ico`) y `scripts/generar_fondos.py` (metal oscuro + marco HUD, acento por pantalla). Los resultados viven en `desktop/assets/`.
@@ -47,6 +63,7 @@ Escritorio PyQt5 + app web (docs/) + nube Supabase. El instalador se compila en 
 ### Intocable (ver reglas): desktop/main.py, .github/workflows/release.yml, core/updater.py, core/paths.py.
 
 ## Siguiente
+0. Probar el HMI y el audio en una ventana real; decidir la voz de V.E.R.A.
 1. Pantalla **Planta**: tarjetas ONLINE/OFFLINE por nodo, estado global, historial de eventos y alertas compartidos (reemplaza Telegram).
 2. Registro de nodos editable (IP por red: Casa, Equipo, Universidad).
 3. Conectar nodos reales (necesito el firmware de Zeno, Albert, Estrella y Sellador).

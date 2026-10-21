@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["WESKER_SIN_AUDIO"] = "1"  # las pruebas nunca deben sonar
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "desktop"))
 
 try:
@@ -138,6 +139,36 @@ class TestVentanas(unittest.TestCase):
         self.assertIn("PUBLICAR_INICIAR", cliente.eventos)
         self._cerrar(win)
         self.assertIn("ZENO-01", win.nube.liberados)
+
+    def test_hmi_muestra_nodos_en_linea_y_registra_eventos(self):
+        win, _ = self._abrir("VIEWER")
+        self.assertIn("Sesión iniciada", win.panel_eventos.toPlainText())
+        self._bombear(1.8)
+        self.assertEqual(win.barra.insignias["ZENO-01"].estado.text(), "EN LÍNEA")     # Pedro publica Zeno
+        self.assertEqual(win.barra.insignias["ALBERT-01"].estado.text(), "SIN SEÑAL")
+        self.assertEqual(win.barra.lbl_planta.text(), "PLANTA PARCIAL")
+        self.assertIn("ZENO-01 en línea", win.panel_eventos.toPlainText())
+        self.assertEqual(win.barra.lbl_nube.text(), "Nube: conectada")
+        self._cerrar(win)
+
+    def test_pantalla_completa_y_sonido(self):
+        win, _ = self._abrir("OPERATOR")
+        win._alternar_pantalla_completa()
+        self.assertTrue(win.isFullScreen())
+        win._alternar_pantalla_completa()
+        self.assertFalse(win.isFullScreen())
+        antes = win.barra.btn_sonido.text()
+        win._alternar_sonido()
+        self.assertNotEqual(win.barra.btn_sonido.text(), antes)
+        win._alternar_sonido()
+        self._cerrar(win)
+
+    def test_mensajes_repetidos_no_inundan_el_registro(self):
+        win, _ = self._abrir("VIEWER")
+        for _ in range(5):
+            win.evento("warn", "mensaje de prueba repetido")
+        self.assertEqual(win.panel_eventos.toPlainText().count("mensaje de prueba repetido"), 1)
+        self._cerrar(win)
 
     def test_estado_hostil_no_rompe_la_pantalla(self):
         win, _ = self._abrir("VIEWER", hostil=True)

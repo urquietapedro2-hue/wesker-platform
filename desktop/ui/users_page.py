@@ -19,6 +19,7 @@ class UsersPage(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        self.setObjectName("pagina")
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(QtWidgets.QLabel("Conectados ahora"))
         self.tabla = QtWidgets.QTableWidget(0, len(COLUMNAS))

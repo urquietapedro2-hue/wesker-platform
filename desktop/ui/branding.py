@@ -1,4 +1,6 @@
 """Identidad visual: logos y fondos desde assets/. Si un archivo falta, la aplicación sigue funcionando sin él."""
+import sys
+
 from PyQt5 import QtCore, QtGui
 
 from core.paths import resource_path
@@ -32,3 +34,18 @@ def fondo_cubriendo(relativa: str, tamano):
     esc = pm.scaled(tamano, QtCore.Qt.KeepAspectRatioByExpanding, QtCore.Qt.SmoothTransformation)
     x, y = (esc.width() - tamano.width()) // 2, (esc.height() - tamano.height()) // 2
     return esc.copy(x, y, tamano.width(), tamano.height())
+
+
+def _identidad_en_windows():
+    """Sin esto, la barra de tareas de Windows agrupa la app bajo «python» y muestra el icono de Python.
+    Debe ejecutarse antes de crear la primera ventana: por eso corre al importar este módulo."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Wesker.Platform.HMI")
+    except Exception:
+        pass
+
+
+_identidad_en_windows()

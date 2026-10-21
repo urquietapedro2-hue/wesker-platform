@@ -24,10 +24,12 @@ class AlbertPage(QtWidgets.QWidget):
 
     NODO = NODO
 
-    def __init__(self, role, auditar, sync=None):
+    def __init__(self, role, auditar, sync=None, evento=None):
         super().__init__()
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        self.setObjectName("pagina")
         self.role, self.auditar, self.sync = role, auditar, sync
+        self.evento = evento or (lambda *a, **k: None)  # el HMI recoge lo que merece verse, oírse o decirse
         self.sim = AlbertSimulator()
         self._ultimo = time.monotonic()
         self._acum_pub = 0.0
@@ -188,8 +190,10 @@ class AlbertPage(QtWidgets.QWidget):
             quien = msg.split(":", 1)[1] if ":" in msg else "otra persona"
             self.fuente.setCurrentIndex(0)  # vuelve a «Ver la planta»
             self.lbl_fuente.setText(f"{quien} ya publica este nodo. Pasaste a ver la planta.")
+            self.evento("warn", f"{quien} ya publica {NODO}; pasaste a ver la planta")
         else:
             self.lbl_fuente.setText(f"No se pudo publicar: {msg}")
+            self.evento("error", f"No se pudo publicar {NODO}: {msg}", "error_publicacion", NODO)
 
     def _on_estado(self, nodo, estado, _publicador):
         if nodo != NODO or self._fuente != "VER":
@@ -197,11 +201,13 @@ class AlbertPage(QtWidgets.QWidget):
         limpio = sanear_albert(estado)  # lo publica otra persona: nunca se aplica sin validar
         if not limpio:
             self.lbl_fuente.setText("Se recibió un estado no válido y se ignoró.")
+            self.evento("error", f"Estado no válido recibido para {NODO}; se ignoró", "estado_invalido", NODO)
             return
         try:
             self.twin.importar_estado(limpio)
         except Exception as ex:  # datos ajenos nunca deben romper la pantalla
             self.lbl_fuente.setText(f"No se pudo aplicar el estado recibido ({type(ex).__name__}).")
+            self.evento("error", f"Estado de {NODO} no aplicable ({type(ex).__name__}); se ignoró", "estado_invalido", NODO)
             return
         self.lbl_proximo.setText(f"Próximo paso en {limpio.get('restante', 0):.0f} s" if limpio.get("corriendo") else "")
 

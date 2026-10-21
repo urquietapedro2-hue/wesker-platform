@@ -10,6 +10,7 @@ IGNORAR = {".git", "build", "dist", "dist_installer", "__pycache__", "node_modul
 EXTENSIONES = {".py", ".json", ".yml", ".yaml", ".sql", ".md", ".html", ".iss", ".txt", ".toml", ".cfg"}
 TOKEN_TELEGRAM = re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b")
 LLAVE_PRIVADA = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+CLAVE_ELEVENLABS = re.compile(r"\bsk_[0-9a-f]{24,}\b")
 JWT = re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 SOLO_LOCAL = {"127.0.0.1", "0.0.0.0"}
@@ -33,12 +34,13 @@ def rol_jwt(token):
 class TestSinSecretos(unittest.TestCase):
     def test_no_hay_tokens_ni_llaves_privadas(self):
         for p in archivos():
-            if p.name == "test_seguridad.py":
-                continue
+            if p.name in ("test_seguridad.py", "verificar_secretos.py", "test_verificar_secretos.py"):
+                continue  # contienen los PATRONES de búsqueda, no secretos
             texto = p.read_text(encoding="utf-8", errors="ignore")
             self.assertIsNone(TOKEN_TELEGRAM.search(texto), f"token tipo Telegram en {p}")
             self.assertIsNone(LLAVE_PRIVADA.search(texto), f"llave privada en {p}")
             self.assertNotIn("sb_secret_", texto, f"clave secreta de Supabase en {p}")
+            self.assertIsNone(CLAVE_ELEVENLABS.search(texto), f"clave de ElevenLabs en {p}")
 
     def test_ningun_jwt_es_service_role(self):
         for p in archivos():
@@ -53,6 +55,18 @@ class TestSinSecretos(unittest.TestCase):
         self.assertEqual(set(cfg), {"supabase_url", "supabase_anon_key", "github_repo"})
         if JWT.fullmatch(cfg["supabase_anon_key"]):
             self.assertEqual(rol_jwt(cfg["supabase_anon_key"]), "anon")
+
+
+class TestGitNoRastreaSecretos(unittest.TestCase):
+    def test_ningun_env_ni_almacen_esta_rastreado_por_git(self):
+        import shutil
+        import subprocess
+        if not shutil.which("git") or not (RAIZ / ".git").exists():
+            self.skipTest("no es un repositorio git")
+        rastreados = subprocess.run(["git", "ls-files"], cwd=RAIZ, capture_output=True, text=True).stdout.splitlines()
+        peligrosos = [r for r in rastreados if r.rsplit("/", 1)[-1] != ".env.example"
+                      and (r.rsplit("/", 1)[-1].startswith((".env", "vera_secretos")) or r.endswith((".pem", ".key", ".pfx", ".p12")))]
+        self.assertEqual(peligrosos, [], "archivos con secretos rastreados por git: sácalos con git rm --cached")
 
 
 class TestSinIpsFijas(unittest.TestCase):

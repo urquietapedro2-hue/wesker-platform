@@ -1,0 +1,14 @@
+SONIDOS DE EVENTOS DE WESKER
+============================
+Pon aquí TUS propios archivos de audio, con estos nombres exactos (WAV recomendado; también MP3 u OGG):
+
+  login_ok.wav        inicio de sesión correcto
+  login_fallo.wav     inicio de sesión fallido
+  error_sistema.wav   error de sistema (nube caída, fallo al publicar, estado inválido...)
+
+Dónde buscarlos, en este orden (gana el primero que exista):
+  1) %APPDATA%\WESKER\sonidos\      -> para probar sin recompilar (solo en tu PC)
+  2) desktop\assets\sonidos\        -> esta carpeta; viaja dentro del instalador
+  3) desktop\assets\sonidos\base\   -> sonidos de ejemplo (tonos sintéticos propios)
+
+Consejos: WAV de 16 bits, 44.1 o 48 kHz, menos de 3 segundos. Usa solo audios que tengas derecho a usar.

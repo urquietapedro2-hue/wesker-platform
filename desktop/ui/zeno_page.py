@@ -21,10 +21,12 @@ class ZenoPage(QtWidgets.QWidget):
 
     NODO = NODO
 
-    def __init__(self, role, auditar, sync=None):
+    def __init__(self, role, auditar, sync=None, evento=None):
         super().__init__()
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        self.setObjectName("pagina")
         self.role, self.auditar, self.sync = role, auditar, sync
+        self.evento = evento or (lambda *a, **k: None)  # el HMI recoge lo que merece verse, oírse o decirse
         self.sim = ZenoSimulator()
         self.corriendo = False
         self._ultimo = time.monotonic()
@@ -172,8 +174,10 @@ class ZenoPage(QtWidgets.QWidget):
             quien = msg.split(":", 1)[1] if ":" in msg else "otra persona"
             self.fuente.setCurrentIndex(0)
             self.lbl_fuente.setText(f"{quien} ya publica este nodo. Pasaste a ver la planta.")
+            self.evento("warn", f"{quien} ya publica {NODO}; pasaste a ver la planta")
         else:
             self.lbl_fuente.setText(f"No se pudo publicar: {msg}")
+            self.evento("error", f"No se pudo publicar {NODO}: {msg}", "error_publicacion", NODO)
 
     def _on_estado(self, nodo, e, _publicador):
         if nodo != NODO or self._fuente != "VER":
@@ -184,6 +188,7 @@ class ZenoPage(QtWidgets.QWidget):
             self.twin.set_telemetria(t["direccion"], t["velocidad"], t["distancia"], t["sensores"], t["subestado"], t["qr"])
         except Exception as ex:  # datos ajenos nunca deben romper la pantalla
             self.lbl_fuente.setText(f"No se pudo aplicar el estado recibido ({type(ex).__name__}).")
+            self.evento("error", f"Estado de {NODO} no aplicable ({type(ex).__name__}); se ignoró", "estado_invalido", NODO)
             return
         self._seg_remoto = t["tramo"]
 

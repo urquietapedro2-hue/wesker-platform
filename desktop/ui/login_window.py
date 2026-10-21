@@ -3,7 +3,8 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from core.auth import AuthError  # noqa: F401  (los mensajes de error llegan por la señal del Worker)
 from core.config import is_configured
 from core.version import __version__
-from ui import branding
+from core.vera_cliente import ClienteVera
+from ui import audio, branding
 from ui.common import UpdateBanner, run_async
 
 NOMBRE_COMPLETO = "Wireless Environment for Synchronized Kernel Execution & Routing"
@@ -15,6 +16,7 @@ class LoginWindow(QtWidgets.QWidget):
     def __init__(self, client, cfg, on_success):
         super().__init__()
         self.client, self.on_success = client, on_success
+        self.vera = ClienteVera()
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.setWindowTitle("WESKER")
         self.setWindowIcon(branding.icono())
@@ -93,9 +95,12 @@ class LoginWindow(QtWidgets.QWidget):
         run_async(self, self.client.sign_in, self._ok, self._fail, email, pwd)
 
     def _ok(self, _profile):
+        audio.reproducir("login_ok")
         self.on_success()
 
     def _fail(self, msg):
+        audio.reproducir("login_fallo")
+        self.vera.enviar("login_fallo", "warn")
         self.pwd.clear()
         self.btn.setEnabled(True)
         self._msg(msg, "#ef4444")
