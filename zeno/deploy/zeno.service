@@ -1,0 +1,21 @@
+# Servicio de systemd para que Zeno arranque solo y se reinicie si falla.
+# Instalación (en la Raspberry):  sudo cp zeno.service /etc/systemd/system/ && sudo systemctl enable --now zeno
+# EDITA User= y WorkingDirectory= según tu Raspberry. No pongas aquí ninguna clave: el token va en ~/.config/wesker/zeno_token.
+[Unit]
+Description=ZENO-01 nodo AGV de WESKER
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/wesker-platform
+ExecStart=/usr/bin/python3 -m zeno
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

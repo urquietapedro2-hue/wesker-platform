@@ -2,13 +2,21 @@
 
 Archivo de relevo entre IAs (Claude / Gemini) y personas. Se actualiza después de cada cambio que funcione.
 
-## Estado actual: v1.4.0 (HMI + audio de eventos + V.E.R.A. independiente)
+## Estado actual: v1.4.0 (HMI + audio de eventos + V.E.R.A. 0.2.0 + Zeno v3 en `zeno/`)
 Escritorio PyQt5 + app web (docs/) + nube Supabase. El instalador se compila en GitHub Actions al subir una etiqueta v*.
 
 ### Pantallas del escritorio (menú lateral)
 - **Conectados**: sesiones activas (nube). Sin cambios de comportamiento.
 - **Albert (dosificadora)**: gemelo portado del proyecto original + panel con estado, recetas, modo manual/automático y simulación.
 - **Zeno (AGV)**: gemelo portado + telemetría, recorrido simulado, obstáculo y control manual.
+
+### Zeno v3 (`zeno/`): nodo robusto y probado en PC (se despliega en la Raspberry, no va en el instalador del HMI)
+- Reemplaza a `ZENO_V2.py` (se conserva). Mismos pines, velocidades, tiempos y formato de telemetría; la decisión `V2` es idéntica a la del archivo original en las 32 combinaciones (prueba contra sus reglas). `--logica NUEVA` = lógica del script de prueba con el sensor nuevo (9 de 31 combinaciones deciden distinto; la tabla está en `PASOS_ZENO_V3.md`). Falta que el dueño elija con una prueba en pista.
+- Fallos de V2 corregidos (verificados leyendo el código y con pruebas de red reales): un `ConnectionResetError` terminaba el programa; en MANUAL un enlace muerto dejaba el último movimiento (el PING se ignoraba); una excepción en el hilo de navegación dejaba el motor con el último movimiento; `listen(1)` con un solo cliente bloqueaba la reconexión; comandos partidos entre paquetes se perdían; `DIAG_PULSE` sin límite; sin autenticación; IP fija en el código; el QR se perdía en cuadros sueltos (parada repetida); JPEG codificado sin espectadores.
+- Protección: vigilancia de enlace en MANUAL (2 s sin órdenes ni PING = paro), supervisor del bucle de navegación, token `AUTH` opcional (archivo `~/.config/wesker/zeno_token`, o `ZENO_TOKEN`), video con token.
+- SIN PROBAR con hardware real: GPIO, motor, servo, cámara y QR (solo con falsos). Hay que seguir `PASOS_ZENO_V3.md` empezando con las ruedas en el aire.
+- Pendiente de hardware: pull-down en RPWM/LPWM del BTS7960, paro físico, y no hay sensor de obstáculos (la distancia es una constante de 35 cm, como en V2).
+- Próximo paso: cliente de Zeno dentro del HMI (AUTH, PING cada 1 s, reconexión con espera creciente, alimentar el gemelo con datos reales) y registro de IPs por red. Zeno aún no se reporta a Supabase.
 
 ### V.E.R.A. 0.2.0: secretos cifrados y diagnóstico (se publica con `git push`, sin etiqueta: V.E.R.A. no va en el instalador)
 - Problema reportado: la voz de ElevenLabs no sonaba y la consola no mostraba errores. Causa del silencio: V.E.R.A. 0.1 no imprimía nada por evento y guardaba los fallos del proveedor solo en `ultimo_error`; además, si el `.env` no se leía, el motor caía en silencio a `silencioso` sin avisar. La causa concreta en la máquina del usuario NO estaba identificada al entregar esta versión: la determina `python -m vera --diagnostico`.

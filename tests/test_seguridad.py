@@ -71,9 +71,10 @@ class TestGitNoRastreaSecretos(unittest.TestCase):
 
 class TestSinIpsFijas(unittest.TestCase):
     def test_el_codigo_de_la_aplicacion_no_tiene_ips_fijas(self):
-        for p in archivos({".py"}, RAIZ / "desktop"):
-            for ip in IPV4.findall(p.read_text(encoding="utf-8", errors="ignore")):
-                self.assertIn(ip, SOLO_LOCAL, f"IP fija {ip} en {p}")
+        for carpeta in ("desktop", "zeno", "vera"):  # HMI, nodo Zeno y V.E.R.A.
+            for p in archivos({".py"}, RAIZ / carpeta):
+                for ip in IPV4.findall(p.read_text(encoding="utf-8", errors="ignore")):
+                    self.assertIn(ip, SOLO_LOCAL, f"IP fija {ip} en {p}")
 
 
 if __name__ == "__main__":
