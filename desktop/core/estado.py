@@ -111,4 +111,5 @@ def sanear_zeno(e) -> dict:
         "qr": qr[:24] if isinstance(qr, str) and qr else "NINGUNO",
         "tramo": _texto(e.get("seg"), 30) or "",
         "corriendo": e.get("corriendo") is True,
+        "origen": "real" if e.get("origen") == "real" else "simulacion",
     }

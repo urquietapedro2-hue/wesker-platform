@@ -29,7 +29,7 @@ Variables opcionales: `ZENO_LOGICA` (V2|NUEVA), `ZENO_TOKEN` o `ZENO_TOKEN_FILE`
 |---|---|
 | `AUTH,<token>` | Obligatorio como primera línea si Zeno tiene token; si falla responde `ERR,AUTH` y cierra |
 | `PING` | Responde `PONG`. Mándalo cada 1 s: en MANUAL es el latido que evita el paro de seguridad |
-| `HELLO` | Responde `HELLO:ZENO-01,<versión>,<lógica>` |
+| `HELLO` | Responde `HELLO:ZENO-01,<versión>,<lógica>,<modo>` (así el HMI sabe en qué modo está Zeno) |
 | `MODE,AUTO` / `MODE,MANUAL` | Cambia de modo y frena |
 | `F,50` `B,50` `L,50` `R,50` `S` | Mover (velocidad 0 a 100); solo en MANUAL |
 | `RESUME` | Sale de la estación antes de los 5 s |

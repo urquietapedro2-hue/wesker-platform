@@ -3,12 +3,17 @@ import time
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from core import updater
+from core.nodos import RegistroNodos
+from core.permissions import puede_controlar
+from core.secretos_local import Almacen as AlmacenHMI
 from core.shared import EstadoCompartido
 from core.version import __version__
 from core.vera_cliente import ClienteVera
 from ui import audio, branding
+from ui.acceso_real import AccesoReal
 from ui.albert_page import AlbertPage
 from ui.common import UpdateBanner, run_async
+from ui.nodos_page import NodosPage
 from ui.hmi import HMI_GRANDE, HMI_STYLE, BarraEstado, FondoCentral, PanelEventos
 from ui.shared_sync import Sincronizador
 from ui.users_page import UsersPage
@@ -18,10 +23,11 @@ REPETIDO_S = 5.0  # el mismo mensaje no se repite en el registro antes de este t
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, client, cfg, on_logout, shared=None):
+    def __init__(self, client, cfg, on_logout, shared=None, registro=None, almacen=None):
         super().__init__()
         self.client, self.on_logout = client, on_logout
         self.shared = shared or EstadoCompartido(client)
+        self.registro, self.almacen, self.endpoints = registro or RegistroNodos(client), almacen or AlmacenHMI(), []
         self._busy, self._bloqueada = False, False
         self._senal, self._nube_ok, self._vistos = {}, None, {}
         p = client.profile
@@ -48,13 +54,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.users = UsersPage()
         self.sync = Sincronizador(self.shared, self)
         self.albert = AlbertPage(p["role"], self.auditar, self.sync, self.evento)
-        self.zeno = ZenoPage(p["role"], self.auditar, self.sync, self.evento)
+        control = puede_controlar(p["role"])
+        self.zeno = ZenoPage(p["role"], self.auditar, self.sync, self.evento,
+                             AccesoReal(lambda: self.endpoints, self.almacen) if control else None)
+        paginas, nombres = [self.users, self.albert, self.zeno], ["Conectados", "Albert (dosificadora)", "Zeno (AGV)"]
+        self.nodos = None
+        if control:  # un Visor no ve direcciones de red de los nodos
+            self.nodos = NodosPage(p["role"], self.registro, self.almacen, self._ejecutar, self.evento, self._set_endpoints)
+            paginas.append(self.nodos)
+            nombres.append("Nodos y red")
         self.stack = QtWidgets.QStackedWidget()
-        for page in (self.users, self.albert, self.zeno):
+        for page in paginas:
             self.stack.addWidget(page)
         self.nav = QtWidgets.QListWidget()
         self.nav.setFixedWidth(200)
-        self.nav.addItems(["Conectados", "Albert (dosificadora)", "Zeno (AGV)"])
+        self.nav.addItems(nombres)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.nav.setCurrentRow(0)
 
@@ -82,6 +96,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.evento("info", f"Sesión iniciada: {self._usuario} ({p['role']})", "sesion_iniciada")
         self.banner.comprobar()
         run_async(self, self.client.min_version, self._check_min, None)
+        if self.nodos is not None:
+            run_async(self, self.registro.listar, self._set_endpoints, self._endpoints_fallo)
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(15000)
@@ -99,6 +115,19 @@ class MainWindow(QtWidgets.QMainWindow):
             audio.reproducir("error_sistema")
         if codigo:
             self.vera.enviar(codigo, "info" if nivel == "ok" else nivel, nodo, self._usuario)
+
+    def _ejecutar(self, fn, ok, fallo=None, *args):
+        """Trabajo de red en segundo plano para las páginas (los hilos cuelgan de esta ventana, que main.py espera al cerrar)."""
+        run_async(self, fn, ok, fallo, *args)
+
+    def _set_endpoints(self, lista):
+        self.endpoints = list(lista)
+        if self.nodos is not None:
+            self.nodos.mostrar(self.endpoints)
+
+    def _endpoints_fallo(self, msg):
+        if self.nodos is not None:
+            self.nodos.estado.setText(f"El registro de direcciones no está disponible: {msg}")
 
     def auditar(self, accion, detalle=None):
         """Evento de auditoría en la nube, en segundo plano: nunca bloquea la ventana."""
@@ -194,6 +223,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _logout(self):
         self.sync.detener()
+        self.zeno.cerrar()
         self._soltar_nodos()
         self.client.sign_out()
         self.on_logout()
@@ -202,6 +232,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def closeEvent(self, event):
         self.timer.stop()
         self.sync.detener()
+        self.zeno.cerrar()
         self._soltar_nodos()
         self.client.sign_out()
         super().closeEvent(event)

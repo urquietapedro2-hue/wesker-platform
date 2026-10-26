@@ -21,7 +21,7 @@ class ZenoPage(QtWidgets.QWidget):
 
     NODO = NODO
 
-    def __init__(self, role, auditar, sync=None, evento=None):
+    def __init__(self, role, auditar, sync=None, evento=None, real=None):
         super().__init__()
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.setObjectName("pagina")
@@ -33,6 +33,8 @@ class ZenoPage(QtWidgets.QWidget):
         self._acum_pub = 0.0
         self._publicador = ""
         self._seg_remoto = ""
+        self.real, self.enlace = real, None            # acceso al Zeno real (si el HMI lo ofrece)
+        self._conectado_real, self._modo_sincronizado, self._origen_remoto = False, False, "simulacion"
 
         self.twin = ZenoDigitalTwin(self)
 
@@ -41,6 +43,8 @@ class ZenoPage(QtWidgets.QWidget):
             self.fuente.addItem("Ver la planta (compartido)", "VER")
         if sync and puede_controlar(role):
             self.fuente.addItem("Publicar mi simulación", "PUBLICAR")
+        if real and puede_controlar(role):
+            self.fuente.addItem("Zeno real (conectar por red)", "REAL")
         if puede_controlar(role) or not sync:
             self.fuente.addItem("Local (solo en esta PC)", "LOCAL")
         self._fuente = self.fuente.itemData(0)
@@ -53,7 +57,7 @@ class ZenoPage(QtWidgets.QWidget):
         fl.addWidget(self.lbl_fuente)
 
         estado, self.v = grupo_valores("Telemetría en vivo", [
-            ("modo", "Modo"), ("dir", "Dirección"), ("pwm", "Potencia"), ("dist", "Distancia frontal"),
+            ("modo", "Modo"), ("origen", "Origen de los datos"), ("dir", "Dirección"), ("pwm", "Potencia"), ("dist", "Distancia frontal"),
             ("sub", "Subestado"), ("qr", "Estación (QR)"), ("seg", "Tramo simulado"),
             ("sens", "Línea S1 a S5")])
 
@@ -129,15 +133,17 @@ class ZenoPage(QtWidgets.QWidget):
 
     @property
     def publicando(self):
-        return self._fuente == "PUBLICAR"
+        return self._fuente in ("PUBLICAR", "REAL")
 
     def _aplicar_permisos(self):
         ok = puede_controlar(self.role) and self._fuente != "VER"
+        real = self._fuente == "REAL"
         auto = self.modo.currentData() == "AUTO"
-        for w in (self.btn_inicio, self.modo, self.vel, self.btn_reinicio):
-            w.setEnabled(ok)
-        self.btn_obstaculo.setEnabled(ok and auto)
-        self.manual.setEnabled(ok and not auto)
+        for w in (self.btn_inicio, self.vel, self.btn_reinicio):
+            w.setEnabled(ok and not real)       # la simulación no se usa con el robot real
+        self.modo.setEnabled(ok and (not real or self._conectado_real))
+        self.btn_obstaculo.setEnabled(ok and auto and not real)
+        self.manual.setEnabled(ok and not auto and (not real or self._conectado_real))
 
     def _texto_fuente(self):
         if self._fuente == "VER":
@@ -145,6 +151,8 @@ class ZenoPage(QtWidgets.QWidget):
                    else "Sin señal: nadie publica este nodo todavía.")
         elif self._fuente == "PUBLICAR":
             txt = "Publicando: todos ven tu simulación."
+        elif self._fuente == "REAL":
+            txt = "Zeno real: conectando…"
         else:
             txt = "Local: lo que hagas aquí no lo ve nadie."
         self.lbl_fuente.setText(txt)
@@ -155,14 +163,71 @@ class ZenoPage(QtWidgets.QWidget):
             return
         if anterior == "PUBLICAR":
             self._soltar()
+        if anterior == "REAL":
+            self._detener_real()
         if self.corriendo:
             self._alternar()
         self._fuente = nueva
         if nueva == "PUBLICAR":
             self._acum_pub = PUBLICAR_CADA
             self.auditar("PUBLICAR_INICIAR", {"nodo": NODO})
+        if nueva == "REAL":
+            self._iniciar_real()
         self._aplicar_permisos()
         self._texto_fuente()
+
+    # ---------------- Zeno real ----------------
+    def _iniciar_real(self):
+        self.enlace = self.real.crear_enlace()
+        self._conectado_real, self._modo_sincronizado, self._acum_pub = False, False, PUBLICAR_CADA
+        self.enlace.iniciar()
+        self.auditar("ZENO_REAL_CONECTAR", {"destinos": len(self.enlace.candidatos), "con_token": bool(self.enlace.token)})
+        self.evento("info", "Conectando con Zeno real…")
+
+    def _detener_real(self):
+        self.cerrar()
+        self._soltar()  # libera el nodo en la nube para que otros no vean datos viejos
+        self.auditar("ZENO_REAL_DESCONECTAR", {})
+        self.evento("warn", "Enlace con Zeno real cerrado")
+
+    def cerrar(self):
+        """Corta el enlace con el robot (al cambiar de fuente o al cerrar el HMI: Zeno frena solo al perder al HMI)."""
+        enlace, self.enlace, self._conectado_real = self.enlace, None, False
+        if enlace is not None:
+            enlace.detener()
+
+    def _actualizar_real(self, snap):
+        conectado = snap["estado"] == "conectado" and snap["telemetria"] is not None
+        if conectado != self._conectado_real:
+            self._conectado_real = conectado
+            self._aplicar_permisos()
+            if conectado:
+                self.evento("ok", f"Zeno real conectado por la red «{snap['red']}»", "nodo_en_linea", NODO)
+            else:
+                self._parar_twin()  # nunca se muestran datos viejos como si fueran actuales
+                self.evento("warn", "Se perdió el enlace con Zeno real", "nodo_sin_senal", NODO)
+        if conectado:
+            t = sanear_zeno(snap["telemetria"])
+            self.twin.set_telemetria(t["direccion"], t["velocidad"], t["distancia"], t["sensores"], t["subestado"], t["qr"])
+            if not self._modo_sincronizado and snap["modo"]:  # Zeno dice en qué modo está: la pantalla se alinea, no al revés
+                self._modo_sincronizado = True
+                self.modo.blockSignals(True)
+                self.modo.setCurrentIndex(max(0, self.modo.findData(snap["modo"])))
+                self.modo.blockSignals(False)
+                self.twin.set_modo(snap["modo"])
+                self._aplicar_permisos()
+            self.lbl_fuente.setText(f"Zeno real conectado por «{snap['red']}»" + (f" (v{snap['version']})." if snap["version"] else "."))
+            return
+        textos = {"rechazado": "Zeno rechazó el token. Corrígelo en la pantalla Nodos y vuelve a elegir «Zeno real».",
+                  "sin_destino": "No hay ninguna IP de Zeno registrada. Un Admin debe agregarla en la pantalla Nodos."}
+        self.lbl_fuente.setText(textos.get(snap["estado"], f"Zeno real: {snap['detalle'] or 'conectando…'}"))
+
+    def _mover_real(self, direccion):
+        orden = "S" if direccion == "S" else f"{direccion},{self.pwm.value()}"
+        salio = self.enlace is not None and self.enlace.enviar(orden)
+        self.auditar("ZENO_REAL_ORDEN", {"orden": orden, "enviada": salio})
+        if not salio:
+            self.evento("warn", "Sin enlace con Zeno: la orden no salió")
 
     def _soltar(self):
         if self.sync:
@@ -190,7 +255,7 @@ class ZenoPage(QtWidgets.QWidget):
             self.lbl_fuente.setText(f"No se pudo aplicar el estado recibido ({type(ex).__name__}).")
             self.evento("error", f"Estado de {NODO} no aplicable ({type(ex).__name__}); se ignoró", "estado_invalido", NODO)
             return
-        self._seg_remoto = t["tramo"]
+        self._seg_remoto, self._origen_remoto = t["tramo"], t["origen"]
 
     def _on_senal(self, nodo, publicador):
         if nodo == NODO:
@@ -206,7 +271,7 @@ class ZenoPage(QtWidgets.QWidget):
         self.twin.set_telemetria("S", 0, 85.0, [0, 0, 0, 0, 0])
 
     def _alternar(self):
-        if self._fuente == "VER":
+        if self._fuente in ("VER", "REAL"):
             return
         if self.corriendo:
             self.corriendo = False
@@ -220,8 +285,13 @@ class ZenoPage(QtWidgets.QWidget):
         self.auditar("SIM_ZENO_INICIAR", {"modo": self.modo.currentData()})
 
     def _cambiar_modo(self):
-        self.twin.set_modo(self.modo.currentData())
+        modo = self.modo.currentData()
+        self.twin.set_modo(modo)
         self._aplicar_permisos()
+        if self._fuente == "REAL" and self.enlace is not None:
+            salio = self.enlace.enviar(f"MODE,{modo}")
+            self.auditar("ZENO_REAL_MODO", {"modo": modo, "enviada": salio})
+            self.evento("info" if salio else "warn", f"Modo {modo} enviado a Zeno" if salio else "Sin enlace: el modo no se envió")
 
     def _obstaculo(self):
         self.sim.provocar_obstaculo(4.0)
@@ -232,6 +302,8 @@ class ZenoPage(QtWidgets.QWidget):
         self._parar_twin()
 
     def _manual(self, direccion):
+        if self._fuente == "REAL":
+            return self._mover_real(direccion)
         parado = direccion == "S"
         self.twin.set_telemetria(direccion, 0 if parado else self.pwm.value(), 85.0,
                                  [0, 0, 0, 0, 0] if parado else SENSORES_CENTRO, "SEGUIMIENTO", "NINGUNO")
@@ -244,7 +316,10 @@ class ZenoPage(QtWidgets.QWidget):
         if self.corriendo and auto and not ver:
             self.twin.set_telemetria(**self.sim.tick(dt, self.vel.value() / 100.0))
         t, v = self.twin, self.v
-        if self._fuente == "PUBLICAR" and self.sync:
+        if self._fuente == "REAL" and self.enlace is not None:
+            self._actualizar_real(self.enlace.snapshot())
+        publica = self._fuente == "PUBLICAR" or (self._fuente == "REAL" and self._conectado_real)  # sin enlace no se publica
+        if publica and self.sync:
             self._acum_pub += dt
             if self._acum_pub >= PUBLICAR_CADA:
                 self._acum_pub = 0.0
@@ -252,8 +327,11 @@ class ZenoPage(QtWidgets.QWidget):
                 self.sync.publicar(NODO, {"modo": t.modo, "dir": t.direccion, "pwm": t.velocidad_pwm,
                                           "dist": t.distancia_frontal, "sens": [int(x) for x in t.sensores_linea],
                                           "sub": t.subestado, "qr": t.estacion_qr, "seg": tramo,
-                                          "corriendo": self.corriendo}, self._error_publicar)
+                                          "corriendo": self.corriendo or self._fuente == "REAL",
+                                          "origen": "real" if self._fuente == "REAL" else "simulacion"}, self._error_publicar)
         v["modo"].setText("Automático" if t.modo == "AUTO" else "Manual")
+        v["origen"].setText("Zeno REAL (esta PC)" if self._fuente == "REAL" else
+                            ("Zeno REAL" if ver and self._origen_remoto == "real" else "Simulación"))
         v["dir"].setText(DIRECCIONES.get(t.direccion, t.direccion))
         v["pwm"].setText(f"{t.velocidad_pwm} %")
         v["dist"].setText(f"{t.distancia_frontal:.0f} cm")

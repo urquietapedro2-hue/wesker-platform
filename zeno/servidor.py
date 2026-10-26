@@ -153,7 +153,7 @@ class ServidorControl:
         if t == "PING":
             self._enviar(conn, "PONG\n")
         elif t == "HELLO":
-            self._enviar(conn, "HELLO:%s,%s,%s\n" % (config.NODO_ID, __version__, self.nav.logica))
+            self._enviar(conn, "HELLO:%s,%s,%s,%s\n" % (config.NODO_ID, __version__, self.nav.logica, self.nav.modo))
         elif t == "MODE":
             self.nav.cambiar_modo(cmd.a)
             self.hw.traccion("S", 0)

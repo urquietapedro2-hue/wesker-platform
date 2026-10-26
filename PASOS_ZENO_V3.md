@@ -50,7 +50,7 @@ Además, con **V2** las combinaciones `10001` y `10101` no tienen regla: Zeno se
 ### 2. En la Raspberry (con las ruedas motrices EN EL AIRE)
 1. Trae el código (`git pull` o copia la carpeta `zeno/`). Conserva `ZENO_V2.py`.
 2. **Sin motores:** `python3 -m zeno --prueba-sensor`. Pasa el sensor por la pista y compara con tu script. Repite con `--logica NUEVA`.
-3. Crea el token: `python3 -m zeno --generar-token`. Cópialo a tu PC por un medio seguro (nunca por chat) a `~/.config/wesker/zeno_token` o `%USERPROFILE%\.config\wesker\zeno_token`.
+3. Crea el token: `python3 -m zeno --generar-token`. El HMI lo guarda **cifrado** (pantalla «Nodos y red» > «Importar desde archivo…», ver `PASOS_HMI_ZENO.md`): no lo dejes como archivo suelto en la PC ni en OneDrive, y nunca lo pegues en un chat.
 4. Arranca: `python3 -m zeno`. Debe decir `autenticación ACTIVA`.
 5. Desde la PC: `python -m zeno.cliente_prueba IP_DE_ZENO`. Escribe `MODE,MANUAL`, luego `F,30`, luego `S`. Las ruedas giran con el robot levantado.
 

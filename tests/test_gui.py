@@ -38,6 +38,20 @@ class ClienteFalso:
         pass
 
 
+class RegistroFalso:
+    def listar(self):
+        from core.nodos import Endpoint
+        return [Endpoint("ZENO-01", "Casa", "192.0.2.10", 65432)]
+
+
+class AlmacenFalso:
+    def hay_token(self):
+        return True
+
+    def token_zeno(self):
+        return "TokenDePrueba-123"
+
+
 class CompartidoFalso:
     """Hace de nube: devuelve un estado de Zeno publicado por 'Pedro' y registra lo que se publica."""
 
@@ -75,7 +89,8 @@ class TestVentanas(unittest.TestCase):
         from ui.main_window import MainWindow
         cliente, nube = ClienteFalso(role), CompartidoFalso(hostil)
         with patch("core.updater.check_latest", return_value=None):
-            win = MainWindow(cliente, {"github_repo": "x/y"}, on_logout=lambda: None, shared=nube)
+            win = MainWindow(cliente, {"github_repo": "x/y"}, on_logout=lambda: None, shared=nube,
+                             registro=RegistroFalso(), almacen=AlmacenFalso())
         win.show()
         win.nube = nube
         return win, cliente
@@ -97,7 +112,7 @@ class TestVentanas(unittest.TestCase):
 
     def test_operador_simula_albert_y_zeno(self):
         win, cliente = self._abrir("OPERATOR")
-        self.assertEqual(win.stack.count(), 3)
+        self.assertEqual(win.stack.count(), 4)                       # conectados, Albert, Zeno y Nodos y red
         self._fuente(win.albert, "LOCAL")
         self._fuente(win.zeno, "LOCAL")
         win.nav.setCurrentRow(1)
@@ -192,12 +207,41 @@ class TestVentanas(unittest.TestCase):
         for w in list(getattr(ventana, "_workers", [])) + list(getattr(ventana.banner, "_workers", [])):
             w.wait(5000)
 
+    def test_el_visor_no_ve_la_pantalla_de_nodos_ni_la_opcion_de_zeno_real(self):
+        win, _ = self._abrir("VIEWER")
+        self.assertEqual((win.stack.count(), win.nodos), (3, None))
+        self.assertEqual(win.zeno.fuente.findData("REAL"), -1)
+        self._cerrar(win)
+
+    def test_el_operador_ve_las_direcciones_registradas_y_la_opcion_real(self):
+        win, _ = self._abrir("OPERATOR")
+        self.assertTrue(esperar_cond(lambda: win.nodos.tabla.rowCount() == 1, self))
+        self.assertEqual(win.nodos.tabla.item(0, 2).text(), "192.0.2.10")
+        self.assertNotEqual(win.zeno.fuente.findData("REAL"), -1)
+        self.assertFalse(win.nodos.btn_guardar.isEnabled())          # solo el Admin edita
+        self._cerrar(win)
+
+    def test_el_admin_puede_editar_direcciones(self):
+        win, _ = self._abrir("ADMIN")
+        self.assertTrue(win.nodos.btn_guardar.isEnabled())
+        self._cerrar(win)
+
     def test_visor_solo_observa(self):
         win, _ = self._abrir("VIEWER")
         self.assertFalse(win.albert.btn_inicio.isEnabled())
         self.assertFalse(win.zeno.btn_inicio.isEnabled())
         self.assertIn("solo permite observar", win.albert.lbl_rol.text())
         self._cerrar(win)
+
+
+def esperar_cond(cond, caso, segundos=3.0):
+    fin = time.monotonic() + segundos
+    while time.monotonic() < fin:
+        caso.qt.processEvents()
+        if cond():
+            return True
+        time.sleep(0.02)
+    return cond()
 
 
 if __name__ == "__main__":

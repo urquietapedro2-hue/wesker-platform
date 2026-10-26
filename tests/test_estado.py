@@ -59,7 +59,12 @@ class TestZeno(unittest.TestCase):
              "qr": "ESTACION_2", "seg": "curva", "corriendo": True}
         self.assertEqual(sanear_zeno(e), {"modo": "MANUAL", "direccion": "FL", "velocidad": 45, "distancia": 20.5,
                                           "sensores": [1, 1, 0, 0, 0], "subestado": "ESTACION_DESCARGA",
-                                          "qr": "ESTACION_2", "tramo": "curva", "corriendo": True})
+                                          "qr": "ESTACION_2", "tramo": "curva", "corriendo": True, "origen": "simulacion"})
+
+    def test_el_origen_solo_puede_ser_real_o_simulacion(self):
+        self.assertEqual(sanear_zeno({"origen": "real"})["origen"], "real")
+        for raro in (None, "REAL", "hackeado", 1, ["real"], {"x": 1}):
+            self.assertEqual(sanear_zeno({"origen": raro})["origen"], "simulacion", raro)
 
     def test_basura_da_siempre_una_telemetria_segura(self):
         seguro = sanear_zeno({})

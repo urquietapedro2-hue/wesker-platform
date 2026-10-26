@@ -86,7 +86,7 @@ class TestSinToken(Base):
         datos = self.leer(s, b"HELLO:", 2.0)
         self.assertIn(b"PONG\n", datos)
         resto = self.leer(s, b"\n", 1.0)
-        self.assertRegex((datos + resto).decode(), r"HELLO:ZENO-01,3\.0\.0,V2")
+        self.assertRegex((datos + resto).decode(), r"HELLO:ZENO-01,3\.0\.0,V2,AUTO")
 
     def test_manual_obedece_y_auto_ignora_los_movimientos(self):
         s = self.conectar()
