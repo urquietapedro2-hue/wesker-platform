@@ -1,14 +1,11 @@
 """Cámara USB, detección de QR y transmisión MJPEG. Basado en ZENO_V2, con tres mejoras: el QR se mantiene un instante
 (evita falsas 'pérdidas' entre cuadros), el JPEG solo se codifica si alguien mira el video, y el video pide el token si hay uno."""
-import hmac
 import logging
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from socketserver import ThreadingMixIn
-from urllib.parse import parse_qs, urlparse
 
 from zeno import config
+from zeno.camara_stream import crear_servidor_video  # noqa: F401  (se re-exporta: lo usa principal)
 
 log = logging.getLogger("zeno.camara")
 QR_PERSISTENCIA_S = 0.6
@@ -21,6 +18,7 @@ class Camara:
         self.cv2, self._reloj, self._nodo, self._modo = cv2, reloj, nodo, modo_fn
         self.detector = cv2.QRCodeDetector()
         self._qr, self._qr_t = "NINGUNO", -1e9
+        self._cx, self._cx_t = 0.0, -1e9
         self._lock_qr, self._lock_frame = threading.Lock(), threading.Lock()
         self.running, self._frame, self.espectadores = False, None, 0
 
@@ -28,6 +26,20 @@ class Camara:
     def qr(self):
         with self._lock_qr:
             return self._qr if self._reloj() - self._qr_t <= QR_PERSISTENCIA_S else "NINGUNO"
+
+    @property
+    def qr_centro(self):
+        """Posición horizontal del último QR visto (-1 izquierda ... +1 derecha) o None si no se ve (>1 s)."""
+        with self._lock_qr:
+            return self._cx if self._reloj() - self._cx_t <= 1.0 else None
+
+    @staticmethod
+    def _centro_x(bbox, ancho=640.0):
+        try:
+            xs = [float(p[0]) for p in bbox.reshape(-1, 2)]
+            return max(-1.0, min(1.0, (sum(xs) / len(xs) - ancho / 2.0) / (ancho / 2.0)))
+        except Exception:
+            return None
 
     def frame(self):
         with self._lock_frame:
@@ -56,9 +68,12 @@ class Camara:
             dato, bbox, _ = self.detector.detectAndDecode(frame)
         except Exception:
             return "", None
-        if dato in config.ESTACIONES_VALIDAS:
-            with self._lock_qr:
+        cx = self._centro_x(bbox) if bbox is not None else None
+        with self._lock_qr:
+            if dato in config.ESTACIONES_VALIDAS:
                 self._qr, self._qr_t = dato, self._reloj()
+            if cx is not None:       # también cuenta si el QR se ve pero no se logra decodificar
+                self._cx, self._cx_t = cx, self._reloj()
         return dato, bbox
 
     def start(self):
@@ -107,43 +122,3 @@ class Camara:
             log.exception("Error al preparar el cuadro de video")
 
 
-class _ServidorVideo(ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-
-
-def crear_servidor_video(camara, host, puerto, token=""):
-    class Manejador(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            return
-
-        def do_GET(self):
-            url = urlparse(self.path)
-            if url.path != "/stream.mjpg":
-                self.send_response(404)
-                self.end_headers()
-                return
-            enviado = (parse_qs(url.query).get("t") or [""])[0]
-            if token and not hmac.compare_digest(enviado.encode("utf-8", "ignore"), token.encode("utf-8")):
-                self.send_response(401)
-                self.end_headers()
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            self.end_headers()
-            camara.espectadores += 1
-            camara.start()
-            try:
-                while True:
-                    actual = camara.frame()
-                    if actual is not None:
-                        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(actual))
-                        self.wfile.write(actual)
-                        self.wfile.write(b"\r\n")
-                    time.sleep(0.04)
-            except Exception:
-                pass
-            finally:
-                camara.espectadores = max(0, camara.espectadores - 1)
-
-    return _ServidorVideo((host, puerto), Manejador)

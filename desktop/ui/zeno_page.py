@@ -3,10 +3,13 @@ import time
 from PyQt5 import QtCore, QtWidgets
 
 from core.estado import sanear_zeno
-from core.permissions import nota_rol, puede_controlar
+from core.permissions import nota_rol, puede_calibrar, puede_controlar
 from core.sim import ZenoSimulator
+from core.zeno_enlace import detectar_estacion
 from ui.panel import grupo_valores, marcas, scroll
 from ui.twins.zeno_twin import ZenoDigitalTwin
+from ui.calibracion_dialog import CalibracionDialog
+from ui.zeno_camara import VisorCamara
 
 DIRECCIONES = {"F": "Adelante", "B": "Atrás", "L": "Izquierda", "R": "Derecha", "S": "Detenido",
                "FL": "Adelante-izquierda", "FR": "Adelante-derecha", "BL": "Atrás-izquierda",
@@ -35,6 +38,7 @@ class ZenoPage(QtWidgets.QWidget):
         self._seg_remoto = ""
         self.real, self.enlace = real, None            # acceso al Zeno real (si el HMI lo ofrece)
         self._conectado_real, self._modo_sincronizado, self._origen_remoto = False, False, "simulacion"
+        self.visor, self.calibracion, self._qr_previo, self._logi_previa = None, None, "NINGUNO", {}
 
         self.twin = ZenoDigitalTwin(self)
 
@@ -97,13 +101,30 @@ class ZenoPage(QtWidgets.QWidget):
         g.addWidget(self.lbl_pwm, 3, 0, 1, 3)
         g.addWidget(self.pwm, 4, 0, 1, 3)
 
+        caja_logi, self.vl = grupo_valores("Ruta y rampas", [
+            ("fase", "Fase"), ("estacion", "Estación (QR)"), ("rampa1", "Rampa 1 (izquierda)"), ("rampa2", "Rampa 2 (derecha)"),
+            ("espera", "Espera de descarga"), ("alarma", "Alarma"), ("servos", "Servos")])
+        self.btn_r1 = QtWidgets.QPushButton("Rampa 1 cargada")
+        self.btn_r2 = QtWidgets.QPushButton("Rampa 2 cargada")
+        self.btn_abortar = QtWidgets.QPushButton("Abortar fase (seguir la línea)")
+        self.btn_camara = QtWidgets.QPushButton("Abrir cámara de Zeno")
+        self.btn_calibrar = QtWidgets.QPushButton("Calibración…")
+        for b, cmd, txt in ((self.btn_r1, "CARGA_RAMPA,1", "Rampa 1 cargada"), (self.btn_r2, "CARGA_RAMPA,2", "Rampa 2 cargada"),
+                            (self.btn_abortar, "ABORTAR", "Fase abortada")):
+            b.clicked.connect(lambda _c, c=cmd, t=txt: self._orden_logistica(c, t))
+            caja_logi.layout().addRow(b)
+        self.btn_camara.clicked.connect(lambda: self._abrir_visor("manual"))
+        self.btn_calibrar.clicked.connect(self._abrir_calibracion)
+        caja_logi.layout().addRow(self.btn_camara)
+        caja_logi.layout().addRow(self.btn_calibrar)
+
         self.lbl_rol = QtWidgets.QLabel(nota_rol(role))
         self.lbl_rol.setObjectName("alerta")
         self.lbl_rol.setWordWrap(True)
 
         panel = QtWidgets.QWidget()
         pl = QtWidgets.QVBoxLayout(panel)
-        for w in (caja_fuente, estado, simulacion, self.manual, self.lbl_rol):
+        for w in (caja_fuente, estado, caja_logi, simulacion, self.manual, self.lbl_rol):
             pl.addWidget(w)
         pl.addStretch(1)
 
@@ -144,6 +165,10 @@ class ZenoPage(QtWidgets.QWidget):
         self.modo.setEnabled(ok and (not real or self._conectado_real))
         self.btn_obstaculo.setEnabled(ok and auto and not real)
         self.manual.setEnabled(ok and not auto and (not real or self._conectado_real))
+        enlazado = ok and real and self._conectado_real
+        for w in (self.btn_r1, self.btn_r2, self.btn_abortar, self.btn_camara):
+            w.setEnabled(enlazado)      # la ruta, las rampas y la cámara son del robot real
+        self.btn_calibrar.setEnabled(real and self._conectado_real and puede_calibrar(self.role))
 
     def _texto_fuente(self):
         if self._fuente == "VER":
@@ -190,8 +215,73 @@ class ZenoPage(QtWidgets.QWidget):
         self.auditar("ZENO_REAL_DESCONECTAR", {})
         self.evento("warn", "Enlace con Zeno real cerrado")
 
+    def _abrir_visor(self, motivo):
+        if self.enlace is None:
+            return
+        if self.visor is None:
+            self.visor = VisorCamara(lambda: self.enlace.url_video() if self.enlace is not None else "", self)
+        self.visor.abrir(motivo)
+        self.auditar("ZENO_CAMARA_ABRIR", {"motivo": motivo})   # nunca se registra la URL: lleva el token
+
+    def _abrir_calibracion(self):
+        if self.enlace is None or not puede_calibrar(self.role):
+            return
+        if self.calibracion is None:
+            self.calibracion = CalibracionDialog(lambda: self.enlace, lambda: self.modo.currentData(), puede_calibrar(self.role),
+                                                 self.auditar, self)
+        self.calibracion.show()
+        self.calibracion.raise_()
+        self.auditar("ZENO_CAL_ABRIR", {})
+
+    def _orden_logistica(self, orden, texto):
+        salio = self.enlace is not None and self.enlace.enviar(orden)
+        self.auditar("ZENO_REAL_LOGISTICA", {"orden": orden, "enviada": salio})
+        self.evento("info" if salio else "warn", f"{texto}: enviada a Zeno" if salio else f"Sin enlace: «{texto}» no salió")
+
+    def _mostrar_logistica(self, d):
+        v = self.vl
+        if not d:
+            for w in v.values():
+                w.setText("—")
+            return
+        fases = {"ST1_CARGA_R1": "Estación 1: esperando carga de la rampa 1", "ST1_INDEXANDO": "Estación 1: avance de indexación",
+                 "ST1_CARGA_R2": "Estación 1: esperando carga de la rampa 2", "SEGUIMIENTO": "Siguiendo la línea",
+                 "ESCANEANDO_QR": "En intersección: buscando QR", "DESCARGANDO": "Descargando", "SALIENDO": "Saliendo de la estación",
+                 "MANUAL": "Modo manual"}
+        v["fase"].setText(fases.get(d["fase"], d["fase"]))
+        v["estacion"].setText(d["estacion"] if d["estacion"] != "NINGUNA" else "—")
+        v["rampa1"].setText("Cargada" if d["carga_r1"] else "Vacía")
+        v["rampa2"].setText("Cargada" if d["carga_r2"] else "Vacía")
+        v["espera"].setText(f"{d['restante_s']:.0f} s" if d["fase"] == "DESCARGANDO" else "—")
+        v["alarma"].setText({"NINGUNA": "Sin alarma", "TIMEOUT_CARGA": "La carga tarda demasiado",
+                             "QR_NO_LEIDO": "No se lee el QR"}.get(d["alarma"], d["alarma"]))
+        a = d["servos"]
+        v["servos"].setText(d["backend"] + ("" if d["i2c"] or d["backend"] != "GPIO" else " (sin I2C)") +
+                            " · dir " + ("—" if a.get("direccion") is None else f"{a['direccion']:.0f}°"))
+
+    def _eventos_logistica(self, d):
+        previa, self._logi_previa = self._logi_previa, d or {}
+        if not d:
+            return
+        if d["alarma"] != "NINGUNA" and d["alarma"] != previa.get("alarma"):
+            self.evento("error", "Zeno en alarma: " + ("la carga tarda demasiado" if d["alarma"] == "TIMEOUT_CARGA" else "no lee el QR"))
+        if d["fase"] != previa.get("fase") and previa:
+            if d["fase"] == "DESCARGANDO":
+                self.evento("info", f"Zeno descarga en {d['estacion']}")
+            elif d["fase"] == "ST1_CARGA_R1":
+                self.evento("info", "Zeno está en la Estación 1 esperando la carga")
+        if d["backend"] == "GPIO" and previa.get("backend") == "PCA9685":
+            self.evento("warn", "Los servos pasaron del PCA9685 a GPIO (falló el I2C)")
+
     def cerrar(self):
         """Corta el enlace con el robot (al cambiar de fuente o al cerrar el HMI: Zeno frena solo al perder al HMI)."""
+        if self.visor is not None:
+            self.visor.cerrar_video()
+            self.visor.close()
+            self.visor = None
+        if self.calibracion is not None:
+            self.calibracion.close()
+            self.calibracion = None
         enlace, self.enlace, self._conectado_real = self.enlace, None, False
         if enlace is not None:
             enlace.detener()
@@ -205,10 +295,21 @@ class ZenoPage(QtWidgets.QWidget):
                 self.evento("ok", f"Zeno real conectado por la red «{snap['red']}»", "nodo_en_linea", NODO)
             else:
                 self._parar_twin()  # nunca se muestran datos viejos como si fueran actuales
+                self._qr_previo = "NINGUNO"
+                self.twin.set_logistica(None)
+                self._mostrar_logistica(None)
                 self.evento("warn", "Se perdió el enlace con Zeno real", "nodo_sin_senal", NODO)
         if conectado:
             t = sanear_zeno(snap["telemetria"])
             self.twin.set_telemetria(t["direccion"], t["velocidad"], t["distancia"], t["sensores"], t["subestado"], t["qr"])
+            ruta = snap.get("ruta")
+            self.twin.set_logistica(ruta)
+            self._mostrar_logistica(ruta)
+            self._eventos_logistica(ruta)
+            estacion = detectar_estacion(self._qr_previo, t["qr"])   # disparador: el QR pasó a una estación distinta
+            self._qr_previo = t["qr"]
+            if estacion:
+                self._abrir_visor(estacion)
             if not self._modo_sincronizado and snap["modo"]:  # Zeno dice en qué modo está: la pantalla se alinea, no al revés
                 self._modo_sincronizado = True
                 self.modo.blockSignals(True)
@@ -251,6 +352,8 @@ class ZenoPage(QtWidgets.QWidget):
         try:
             self.twin.set_modo(t["modo"])
             self.twin.set_telemetria(t["direccion"], t["velocidad"], t["distancia"], t["sensores"], t["subestado"], t["qr"])
+            self.twin.set_logistica(t["logistica"])
+            self._mostrar_logistica(t["logistica"])
         except Exception as ex:  # datos ajenos nunca deben romper la pantalla
             self.lbl_fuente.setText(f"No se pudo aplicar el estado recibido ({type(ex).__name__}).")
             self.evento("error", f"Estado de {NODO} no aplicable ({type(ex).__name__}); se ignoró", "estado_invalido", NODO)
@@ -328,7 +431,8 @@ class ZenoPage(QtWidgets.QWidget):
                                           "dist": t.distancia_frontal, "sens": [int(x) for x in t.sensores_linea],
                                           "sub": t.subestado, "qr": t.estacion_qr, "seg": tramo,
                                           "corriendo": self.corriendo or self._fuente == "REAL",
-                                          "origen": "real" if self._fuente == "REAL" else "simulacion"}, self._error_publicar)
+                                          "origen": "real" if self._fuente == "REAL" else "simulacion",
+                                          "logi": self.twin.logistica if self._fuente == "REAL" else None}, self._error_publicar)
         v["modo"].setText("Automático" if t.modo == "AUTO" else "Manual")
         v["origen"].setText("Zeno REAL (esta PC)" if self._fuente == "REAL" else
                             ("Zeno REAL" if ver and self._origen_remoto == "real" else "Simulación"))

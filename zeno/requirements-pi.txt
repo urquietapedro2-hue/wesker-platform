@@ -1,0 +1,2 @@
+# Solo para la Raspberry (no va en el instalador del HMI). Sin esto Zeno usa GPIO directo para los servos.
+adafruit-circuitpython-pca9685

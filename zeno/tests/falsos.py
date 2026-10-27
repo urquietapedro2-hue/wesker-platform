@@ -41,10 +41,11 @@ class FakeGPIO:
 
 class FakeCamara:
     def __init__(self):
-        self.qr, self.inicios, self.paros = "NINGUNO", 0, 0
+        self.qr, self.inicios, self.paros, self.qr_centro, self.espectadores, self._frame = "NINGUNO", 0, 0, None, 0, None
 
     def start(self): self.inicios += 1
     def stop(self): self.paros += 1
+    def frame(self): return self._frame
 
 
 class FakeCapture:
@@ -94,3 +95,55 @@ def esperar(condicion, segundos=3.0, paso=0.02):
             return True
         time.sleep(paso)
     return condicion()
+
+
+class FakePCA:
+    """PCA9685 falso. `roto` simula fallos de I2C (OSError)."""
+    def __init__(self): self.pulsos, self.apagados, self.roto, self.cerrado = [], [], False, False
+
+    def pulso_us(self, canal, us):
+        if self.roto:
+            raise OSError(121, "Remote I/O error")
+        self.pulsos.append((canal, us))
+
+    def apagar(self, canal):
+        if self.roto:
+            raise OSError(121, "Remote I/O error")
+        self.apagados.append(canal)
+
+    def cerrar(self): self.cerrado = True
+
+
+class Reloj:
+    def __init__(self, t=100.0): self.t = t
+    def __call__(self): return self.t
+    def avanzar(self, s): self.t += s
+
+
+# ---------------------------------------------------------------- armado de Zeno para pruebas
+def calibracion_prueba(**cambios):
+    """Calibración en una carpeta temporal, sin pausa de dirección (las pruebas no esperan)."""
+    import os
+    import tempfile
+    from zeno.calibracion import Calibracion
+    cal = Calibracion(os.path.join(tempfile.mkdtemp(), "cal.json"))
+    base = {"direccion_pausa_s": 0.0}
+    base.update(cambios)
+    cal.set_many(base)
+    return cal
+
+
+def hardware_prueba(gpio, **cambios):
+    from zeno.hardware import Hardware
+    from zeno.servos import GestorServos
+    cal = calibracion_prueba(**cambios)
+    return Hardware(cal, gpio, servos=GestorServos(gpio=gpio, intentar_pca=False, cal=cal))
+
+
+def ruta_prueba(hw, logica="V2", fase_inicial="SEGUIMIENTO", reloj=None):
+    from zeno.ruta import Ruta
+    from zeno.servos import PanCamara, Rampas
+    pan = PanCamara(hw.servos, hw.cal)
+    ruta = Ruta(hw.cal, Rampas(hw.servos, hw.cal), pan, logica, fase_inicial=fase_inicial, **({"reloj": reloj} if reloj else {}))
+    ruta.pan = pan
+    return ruta

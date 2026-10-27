@@ -37,6 +37,7 @@ class ZenoDigitalTwin(QtWidgets.QWidget):
         self.subestado = "SEGUIMIENTO"
         self.modo = "AUTO"
         self.estacion_qr = "NINGUNO"
+        self.logistica = None
 
         # Barra BFD-1000: S1, S2, S3, S4, S5 (Todos activos e independientes)
         self.sensores_linea = [False, False, False, False, False]
@@ -56,6 +57,13 @@ class ZenoDigitalTwin(QtWidgets.QWidget):
         self._parpadeo = not self._parpadeo
         if self.subestado == "ESTACION_DESCARGA" or self.estacion_qr != "NINGUNO":
             self.update()
+
+    def set_logistica(self, d):
+        """Estado de la ruta real (o None): d["fase"], d["estacion"], d["carga_r1"], d["carga_r2"] (bool), d["alarma"],
+        d["restante_s"], d["servos"] = {direccion, camara, rampa1, rampa2: grados o None}.
+        Solo se guarda: la capa superior dinámica del gemelo (rampas cargadas/abiertas) puede leer self.logistica al dibujar."""
+        self.logistica = d if isinstance(d, dict) else None
+        self.update()
 
     def set_modo(self, modo: str):
         self.modo = modo

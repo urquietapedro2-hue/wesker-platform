@@ -9,14 +9,16 @@ import threading
 import time
 
 from zeno import __version__, config
-from zeno.logica import Navegador
+from zeno.calibracion import Calibracion
+from zeno.ruta import Ruta
+from zeno.servos import PanCamara, Rampas
 
 log = logging.getLogger("zeno")
 
 
 class Aplicacion:
-    def __init__(self, hw, camara, nav, servidor, reloj=time.monotonic, paso_s=0.012):
-        self.hw, self.camara, self.nav, self.servidor = hw, camara, nav, servidor
+    def __init__(self, hw, camara, ruta, servidor, pan, reloj=time.monotonic, paso_s=0.012):
+        self.hw, self.camara, self.nav, self.servidor, self.pan = hw, camara, ruta, servidor, pan
         self._reloj, self._paso_s = reloj, paso_s
         self._latido, self._detener = reloj(), threading.Event()
         self.errores_navegacion = 0
@@ -33,15 +35,19 @@ class Aplicacion:
     def _aplicar(self, orden):
         if orden.mensaje:
             log.info(orden.mensaje)
-        if orden.camara:
+        if orden.camara is True:
             self.camara.start()
+        elif orden.camara is False and self.camara.espectadores == 0:   # si alguien mira el video no se apaga
+            self.camara.stop()
         if orden.cmd is not None:
             self.hw.traccion(orden.cmd, orden.vel)
 
     def _bucle_navegacion(self):
         while not self._detener.is_set():
             try:
-                self._aplicar(self.nav.paso(self.hw.leer_sensores(), self.camara.qr, self._reloj()))
+                ahora = self._reloj()
+                self.pan.tick(self.camara.qr_centro, ahora)
+                self._aplicar(self.nav.paso(self.hw.leer_sensores(), self.camara.qr, ahora))
                 self._latido = self._reloj()
             except Exception:  # V2: un error aquí mataba el hilo y Zeno seguía con el último movimiento
                 self.errores_navegacion += 1
@@ -81,7 +87,7 @@ def _prueba_sensor(logica):
     """Tu script de prueba, integrado: muestra lo que Zeno decidiría con cada lectura, sin mover los motores."""
     from zeno.hardware import Hardware
     from zeno.logica import LOGICAS
-    hw = Hardware()
+    hw = Hardware(Calibracion())
     print("Prueba de sensores (lógica %s). Ctrl+C para salir." % logica)
     try:
         while True:
@@ -99,12 +105,22 @@ def _prueba_sensor(logica):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python3 -m zeno", description="Nodo AGV ZENO-01 de WESKER")
     ap.add_argument("--prueba-sensor", action="store_true", help="muestra las decisiones de la regleta sin mover motores")
+    ap.add_argument("--calibracion-defecto", action="store_true", help="crea el archivo de calibración con los valores de fábrica")
     ap.add_argument("--generar-token", action="store_true", help="crea el token de acceso del HMI")
     ap.add_argument("--logica", choices=("V2", "NUEVA"), default=config.LOGICA_NAVEGACION)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
     if args.generar_token:
         return _generar_token()
+    if args.calibracion_defecto:
+        cal = Calibracion()
+        if os.path.exists(cal.ruta):
+            print("Ya existe %s: no se sobrescribe. Bórralo antes si quieres volver a los valores de fábrica." % cal.ruta)
+            return 1
+        cal.defecto()
+        cal.guardar()
+        print("Calibración de fábrica escrita en %s" % cal.ruta)
+        return 0
     if args.prueba_sensor:
         return _prueba_sensor(args.logica)
 
@@ -113,10 +129,19 @@ def main(argv=None):
     from zeno.servidor import ServidorControl
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # systemd detiene con SIGTERM: así corre el cierre ordenado
     token = config.cargar_token()
-    hw, nav = Hardware(), Navegador(args.logica)
-    camara = Camara(modo_fn=lambda: nav.modo)
-    servidor = ServidorControl(hw, nav, camara, token)
-    app = Aplicacion(hw, camara, nav, servidor)
+    cal = Calibracion()
+    for aviso in cal.avisos:
+        log.warning("Calibración: %s", aviso)
+    hw = Hardware(cal)
+    rampas, pan = Rampas(hw.servos, cal), PanCamara(hw.servos, cal)
+    ruta = Ruta(cal, rampas, pan, args.logica)
+    camara = Camara(modo_fn=lambda: ruta.modo)
+    servidor = ServidorControl(hw, ruta, camara, token, cal=cal, pan=pan)
+    app = Aplicacion(hw, camara, ruta, servidor, pan)
+    ruta.cambiar_modo("AUTO")      # arranca bloqueando las rampas y esperando la carga de la Estación 1
+    est = hw.servos.estado()
+    log.info("Servos: %s (I2C %s)%s | calibración: %s", est["backend"], "OK" if est["i2c"] else "no",
+             "" if est["i2c"] else " - motivo: %s" % est["motivo"], cal.ruta)
     video = crear_servidor_video(camara, config.HOST, config.PUERTO_VIDEO, token)
     threading.Thread(target=video.serve_forever, daemon=True).start()
     log.info("ZENO-01 v%s | lógica %s | control :%d | video :%d | autenticación %s", __version__, args.logica,

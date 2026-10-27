@@ -94,6 +94,23 @@ def sanear_albert(e) -> dict:
     return s
 
 
+def sanear_logistica(d):
+    """Estado de la ruta de Zeno (fase, cargas de rampas, servos) publicado por otra persona. None si no hay o no es válido."""
+    from core.zeno_enlace import ALARMAS, BACKENDS, ESTACIONES, FASES as FASES_RUTA, NOMBRES_SERVO
+    if not isinstance(d, dict):
+        return None
+    fase = _enum(d.get("fase"), FASES_RUTA)
+    if fase is None:
+        return None
+    est = d.get("estacion")
+    servos = d.get("servos") if isinstance(d.get("servos"), dict) else {}
+    return {"fase": fase, "estacion": est if est in ESTACIONES else "NINGUNA",
+            "carga_r1": d.get("carga_r1") is True, "carga_r2": d.get("carga_r2") is True,
+            "alarma": _enum(d.get("alarma"), ALARMAS) or "NINGUNA", "restante_s": _real(d.get("restante_s"), 0.0, 3600.0) or 0.0,
+            "backend": _enum(d.get("backend"), BACKENDS) or "NINGUNO", "i2c": d.get("i2c") is True,
+            "servos": {n: _real(servos.get(n), 0.0, 180.0) for n in NOMBRES_SERVO}}
+
+
 def sanear_zeno(e) -> dict:
     """Devuelve la telemetría de Zeno lista para set_telemetria() (siempre completa y válida)."""
     e = e if isinstance(e, dict) else {}
@@ -112,4 +129,5 @@ def sanear_zeno(e) -> dict:
         "tramo": _texto(e.get("seg"), 30) or "",
         "corriendo": e.get("corriendo") is True,
         "origen": "real" if e.get("origen") == "real" else "simulacion",
+        "logistica": sanear_logistica(e.get("logi")),
     }

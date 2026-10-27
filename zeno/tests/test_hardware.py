@@ -6,20 +6,19 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 sys.path.insert(0, os.path.dirname(__file__))
 
-from falsos import FakeGPIO, esperar  # noqa: E402
+from falsos import FakeGPIO, esperar, hardware_prueba  # noqa: E402
 from zeno import config  # noqa: E402
-from zeno.hardware import Hardware  # noqa: E402
 
 
 class TestHardware(unittest.TestCase):
     def setUp(self):
         self.gpio = FakeGPIO()
-        self.hw = Hardware(self.gpio, pausa_servo=0)
+        self.hw = hardware_prueba(self.gpio)
         self.fwd, self.rev, self.servo = (self.gpio.pwms[config.PIN_RPWM], self.gpio.pwms[config.PIN_LPWM],
                                           self.gpio.pwms[config.PIN_SERVO])
 
     def duty(self, angulo):
-        return 2.5 + max(45.0, min(135.0, angulo + config.OFFSET_SERVO_TRIM)) / 18.0
+        return 2.5 + max(45.0, min(135.0, angulo + self.hw.cal['direccion_trim'])) / 18.0
 
     def test_arranque_centra_la_direccion_con_el_trim_y_suelta_el_servo(self):
         self.assertEqual((self.fwd.duty, self.rev.duty), (0, 0))
@@ -32,9 +31,9 @@ class TestHardware(unittest.TestCase):
         self.assertEqual((self.fwd.duty, self.rev.duty, self.hw.estado_movimiento, self.hw.velocidad_actual), (45, 0, "F", 45))
         self.hw.traccion("L", 42)
         self.assertEqual((self.fwd.duty, self.hw.estado_movimiento), (42, "L"))
-        self.assertAlmostEqual(self.servo.historial[-2], self.duty(65))
+        self.assertAlmostEqual(self.servo.historial[-2], self.duty(125))
         self.hw.traccion("R", 40)
-        self.assertAlmostEqual(self.servo.historial[-2], self.duty(115))
+        self.assertAlmostEqual(self.servo.historial[-2], self.duty(70))
         self.hw.traccion("B", 30)
         self.assertEqual((self.fwd.duty, self.rev.duty, self.hw.estado_movimiento), (0, 30, "B"))
         self.hw.traccion("S", 0)
@@ -76,7 +75,7 @@ class TestHardware(unittest.TestCase):
 
     def test_pulso_de_diagnostico_gira_y_regresa_o_avanza_y_frena(self):
         self.hw.pulso("L", 40, 50)
-        self.assertTrue(esperar(lambda: self.servo.historial.count(self.duty(65)) == 1 and self.servo.historial.count(self.duty(90)) >= 2))
+        self.assertTrue(esperar(lambda: self.servo.historial.count(self.duty(125)) == 1 and self.servo.historial.count(self.duty(90)) >= 2))
         self.hw.pulso("F", 40, 50)
         self.assertTrue(esperar(lambda: self.fwd.duty == 40))
         self.assertTrue(esperar(lambda: self.fwd.duty == 0 and self.hw.estado_movimiento == "S"))

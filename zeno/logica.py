@@ -1,11 +1,7 @@
-"""Lógica pura de Zeno (sin GPIO, sin cámara, sin red): se prueba entera en una PC. Decisiones idénticas a ZENO_V2."""
+"""Lógica pura de Zeno (sin GPIO, sin cámara, sin red): se prueba entera en una PC.
+Reglas de seguimiento de línea (idénticas a ZENO_V2 / la lógica NUEVA) y protocolo de red. La máquina de estados está en ruta.py."""
 import time
 from collections import namedtuple
-
-from zeno import config
-
-Orden = namedtuple("Orden", "cmd vel camara mensaje")  # cmd None = no cambiar lo que ya hace
-SIN_CAMBIO = Orden(None, 0, False, "")
 
 
 def decidir_v2(s):
@@ -41,61 +37,6 @@ def decidir_nueva(s):
 LOGICAS = {"V2": decidir_v2, "NUEVA": decidir_nueva}
 
 
-class Navegador:
-    """Máquina de estados del modo AUTO (SEGUIMIENTO -> ESTACION_DESCARGA -> SALIENDO_ESTACION). Sin esperas bloqueantes."""
-
-    def __init__(self, logica="V2", reloj=time.monotonic):
-        if logica not in LOGICAS:
-            raise ValueError("lógica de navegación desconocida: %s" % logica)
-        self._decidir, self._reloj = LOGICAS[logica], reloj
-        self.logica = logica
-        self.modo, self.sub = "AUTO", "SEGUIMIENTO"
-        self.ultima_estacion = "NINGUNO"
-        self._t_arribo, self._t_salida = 0.0, None
-
-    def cambiar_modo(self, modo):
-        self.modo, self._t_salida = modo, None
-        if modo == "AUTO":
-            self.sub = "SEGUIMIENTO"
-
-    def reanudar(self):
-        if self.sub == "ESTACION_DESCARGA":
-            self.sub = "SALIENDO_ESTACION"
-            self._t_salida = None
-            return True
-        return False
-
-    def paso(self, sensores, qr, ahora=None):
-        ahora = self._reloj() if ahora is None else ahora
-        if self.modo != "AUTO":
-            return SIN_CAMBIO
-        if self.sub == "ESTACION_DESCARGA":
-            if ahora - self._t_arribo >= config.TIEMPO_ESPERA_ESTACION:
-                self.sub = "SALIENDO_ESTACION"
-                self._t_salida = None
-                return Orden("S", 0, True, "Ciclo cumplido en %s. Desalojando bahía..." % self.ultima_estacion)
-            return Orden("S", 0, True, "")
-        if self.sub == "SALIENDO_ESTACION":  # avance ciego: ignora los sensores durante SALIDA_CIEGA_S
-            if self._t_salida is None:
-                self._t_salida = ahora
-            if ahora - self._t_salida < config.SALIDA_CIEGA_S:
-                return Orden("F", 45, False, "")
-            self.sub, self._t_salida = "SEGUIMIENTO", None
-            return SIN_CAMBIO
-        s1, s2, s3, s4, s5 = sensores
-        es_base = (s1 == 1 and s2 == 1 and s3 == 1 and s4 == 1 and s5 == 1)
-        es_nuevo_qr = (qr in config.ESTACIONES_VALIDAS and qr != self.ultima_estacion)
-        if es_base or es_nuevo_qr:
-            self.sub, self._t_arribo = "ESTACION_DESCARGA", ahora
-            self.ultima_estacion = qr if qr != "NINGUNO" else "ZONA_DESCARGA"
-            grano = config.GRANOS_ESTACION.get(qr, "ZONA GENERAL")
-            return Orden("S", 0, True, "Arribo a %s (%s)" % (self.ultima_estacion, grano))
-        if qr == "NINGUNO" and self.ultima_estacion != "NINGUNO":
-            self.ultima_estacion = "NINGUNO"
-        decision = self._decidir(sensores)
-        return SIN_CAMBIO if decision is None else Orden(decision[0], decision[1], False, "")
-
-
 # ---------------------------------------------------------------- protocolo
 Comando = namedtuple("Comando", "tipo a b c")
 MOVIMIENTOS = ("F", "B", "L", "R", "S")
@@ -115,13 +56,32 @@ def parsear_comando(linea):
     cmd = partes[0].upper()
     if not cmd:
         return Comando("VACIO", None, None, None)
-    if cmd in ("PING", "HELLO", "RESUME", "CAM_ON", "CAM_OFF") and len(partes) == 1:
+    if cmd in ("PING", "HELLO", "CAM_ON", "CAM_OFF", "ABORTAR", "CAL_GET", "CAL_ESQUEMA", "CAL_GUARDAR", "CAL_RESTAURAR",
+               "CAL_DEFECTO") and len(partes) == 1:
         return Comando(cmd, None, None, None)
     if cmd == "AUTH" and len(partes) == 2:
         return Comando("AUTH", partes[1], None, None)  # el token se conserva tal cual (distingue mayúsculas)
     if cmd == "MODE":
         modo = partes[1].upper() if len(partes) == 2 else ""
         return Comando("MODE", modo, None, None) if modo in ("AUTO", "MANUAL") else Comando("INVALIDO", "MODE debe ser AUTO o MANUAL", None, None)
+    if cmd == "CARGA_RAMPA":    # la rampa n ya fue cargada (botón del HMI o, más adelante, Albert)
+        n = _entero(partes[1], 1, 2) if len(partes) == 2 else None
+        return Comando("CARGA_RAMPA", n, None, None) if n else Comando("INVALIDO", "CARGA_RAMPA,1|2", None, None)
+    if cmd == "CAL_SET":        # CAL_SET,clave,valor  (el valor se valida en Calibracion)
+        if len(partes) == 3 and partes[1] and partes[2]:
+            return Comando("CAL_SET", partes[1], partes[2], None)
+        return Comando("INVALIDO", "CAL_SET,clave,valor", None, None)
+    if cmd == "CAL_PROBAR":     # CAL_PROBAR,servo,grados: mueve un servo para ver el efecto mientras se calibra (solo MANUAL)
+        ang = _entero(partes[2], 0, 180) if len(partes) == 3 else None
+        if len(partes) == 3 and partes[1].lower() in ("direccion", "camara", "rampa1", "rampa2") and ang is not None:
+            return Comando("CAL_PROBAR", partes[1].lower(), ang, None)
+        return Comando("INVALIDO", "CAL_PROBAR,direccion|camara|rampa1|rampa2,0-180", None, None)
+    if cmd == "PAN":
+        arg = partes[1].upper() if len(partes) == 2 else ""
+        if arg in ("AUTO", "CENTRO"):
+            return Comando("PAN", arg, None, None)
+        ang = _entero(arg, 0, 180)
+        return Comando("PAN", ang, None, None) if ang is not None else Comando("INVALIDO", "PAN,AUTO|CENTRO|0-180", None, None)
     if cmd == "DIAG_PULSE":
         d = partes[1].upper() if len(partes) > 1 else "F"
         v = _entero(partes[2], 0, 100) if len(partes) > 2 else 45
@@ -139,6 +99,16 @@ def formatear_telemetria(direccion, velocidad, distancia, sensores, subestado, q
     """Formato idéntico al de ZENO_V2 (el HMI ya lo entiende)."""
     s1, s2, s3, s4, s5 = sensores
     return "TELEM:%s,%d,%.1f,%d,%d,%d,%d,%d,%s,%s\n" % (direccion, int(velocidad), distancia, s1, s2, s3, s4, s5, subestado, qr)
+
+
+def formatear_ruta(r, servos, cal_version):
+    """Línea adicional después de TELEM (un HMI viejo la ignora):
+    RUTA:fase,estacion,carga_r1,carga_r2,alarma,restante_s,backend,i2c,ang_dir,ang_cam,ang_r1,ang_r2,cal_version
+    `r` es Ruta.estado(); `servos` es GestorServos.estado(); '-' = servo aún sin mover."""
+    ang = [("-" if servos["servos"][n]["angulo"] is None else "%.0f" % servos["servos"][n]["angulo"])
+           for n in ("direccion", "camara", "rampa1", "rampa2")]
+    return "RUTA:%s,%s,%d,%d,%s,%.0f,%s,%d,%s,%d\n" % (r["fase"], r["estacion"], int(r["carga_r1"]), int(r["carga_r2"]), r["alarma"],
+                                                  r["restante_s"], servos["backend"], int(servos["i2c"]), ",".join(ang), cal_version)
 
 
 class VigilanteEnlace:

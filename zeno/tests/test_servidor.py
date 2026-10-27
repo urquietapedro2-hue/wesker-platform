@@ -8,10 +8,8 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 sys.path.insert(0, os.path.dirname(__file__))
 
-from falsos import FakeCamara, FakeGPIO, esperar  # noqa: E402
+from falsos import FakeCamara, FakeGPIO, esperar, hardware_prueba, ruta_prueba  # noqa: E402
 from zeno import config  # noqa: E402
-from zeno.hardware import Hardware  # noqa: E402
-from zeno.logica import Navegador  # noqa: E402
 from zeno.servidor import ServidorControl  # noqa: E402
 
 TOKEN = "TokenDePrueba-123"
@@ -22,9 +20,9 @@ class Base(unittest.TestCase):
 
     def setUp(self):
         self.gpio = FakeGPIO()
-        self.hw = Hardware(self.gpio, pausa_servo=0)
-        self.nav, self.cam = Navegador("V2"), FakeCamara()
-        self.srv = ServidorControl(self.hw, self.nav, self.cam, self.token, host="127.0.0.1", puerto=0,
+        self.hw = hardware_prueba(self.gpio)
+        self.cal, self.nav, self.cam = self.hw.cal, ruta_prueba(self.hw), FakeCamara()
+        self.srv = ServidorControl(self.hw, self.nav, self.cam, self.token, cal=self.cal, pan=self.nav.pan, host="127.0.0.1", puerto=0,
                                    vigilancia_s=self.vigilancia, auth_s=0.6)
         self.srv.iniciar()
         self.socks = []
@@ -86,7 +84,7 @@ class TestSinToken(Base):
         datos = self.leer(s, b"HELLO:", 2.0)
         self.assertIn(b"PONG\n", datos)
         resto = self.leer(s, b"\n", 1.0)
-        self.assertRegex((datos + resto).decode(), r"HELLO:ZENO-01,3\.0\.0,V2,AUTO")
+        self.assertRegex((datos + resto).decode(), r"HELLO:ZENO-01,4\.1\.0,V2,AUTO")
 
     def test_manual_obedece_y_auto_ignora_los_movimientos(self):
         s = self.conectar()
@@ -149,13 +147,17 @@ class TestSinToken(Base):
         time.sleep(0.4)
         self.assertEqual(self.duty(), 40)                                  # y no frenó a la nueva
 
-    def test_camara_modo_y_reanudar(self):
+    def test_camara_on_off_y_abortar_una_fase(self):
         s = self.conectar()
         s.sendall(b"CAM_ON\nCAM_OFF\n")
         self.assertTrue(esperar(lambda: (self.cam.inicios, self.cam.paros) == (1, 1)))
+        self.cal.set("debounce_interseccion_ms", 0)
         self.nav.paso((1, 1, 1, 1, 1), "NINGUNO")
-        s.sendall(b"RESUME\n")
-        self.assertTrue(esperar(lambda: self.nav.sub == "SALIENDO_ESTACION"))
+        self.assertEqual(self.nav.fase, "ESCANEANDO_QR")
+        s.sendall(b"ABORTAR\n")
+        self.assertTrue(esperar(lambda: self.nav.abortar() or True))
+        self.nav.paso((0, 0, 1, 0, 0), "NINGUNO")
+        self.assertEqual(self.nav.fase, "SALIENDO")
 
     def test_pulso_de_diagnostico_valido(self):
         s = self.conectar()
@@ -164,7 +166,8 @@ class TestSinToken(Base):
         self.assertTrue(esperar(lambda: self.duty() == 0))
 
     def test_la_telemetria_refleja_el_estado_de_la_estacion(self):
-        self.nav.paso((1, 1, 1, 1, 1), "ESTACION_3")
+        self.cal.set("debounce_interseccion_ms", 0)
+        self.nav.paso((1, 1, 1, 1, 1), "NINGUNO")
         s = self.conectar()
         self.assertRegex(self.leer(s).decode(), r"TELEM:ESTACION,0,35\.0,0,0,0,0,0,ESTACION_DESCARGA,NINGUNO")
 

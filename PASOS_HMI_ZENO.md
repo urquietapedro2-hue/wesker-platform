@@ -30,7 +30,7 @@ Ejecuta `supabase/04_endpoints_red.sql` en SQL Editor. Si no lo ejecutas, «Nodo
 5. Nunca pegues el token en un chat ni lo dejes en un archivo suelto.
 
 ### 5. Registrar la IP (solo Admin)
-En «Nodos y red»: nodo `ZENO-01`, red (por ejemplo `Casa`), la IP del paso 3, puerto `65432` > **Guardar dirección**. Selecciona la fila y pulsa **Probar conexión**: debe decir «Conectado. ZENO-01 | 3.0.0 | …».
+En «Nodos y red»: nodo `ZENO-01`, red (por ejemplo `Casa`), la IP del paso 3, puerto `65432` > **Guardar dirección**. Selecciona la fila y pulsa **Probar conexión**: debe decir «Conectado. ZENO-01 | 4.0.0 | …».
 
 ### 6. Conectar
 1. Página **Zeno (AGV)** > fuente **«Zeno real (conectar por red)»**.

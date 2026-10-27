@@ -13,10 +13,9 @@ sys.path.insert(0, str(RAIZ))
 sys.path.insert(0, str(RAIZ / "zeno" / "tests"))
 
 try:
-    from falsos import FakeCamara, FakeGPIO  # noqa: E402
+    from falsos import FakeCamara, FakeGPIO, hardware_prueba, ruta_prueba  # noqa: E402
     from zeno import config as cfg_zeno  # noqa: E402
-    from zeno.hardware import Hardware  # noqa: E402
-    from zeno.logica import Navegador, formatear_telemetria  # noqa: E402
+    from zeno.logica import formatear_telemetria  # noqa: E402
     from zeno.servidor import ServidorControl  # noqa: E402
     HAY_ZENO = True
 except ImportError:
@@ -50,8 +49,10 @@ class Base(unittest.TestCase):
 
     def levantar(self, puerto=0, vigilancia=2.0):
         gpio = FakeGPIO()
-        hw = Hardware(gpio, pausa_servo=0)
-        srv = ServidorControl(hw, Navegador("V2"), FakeCamara(), self.token, host="127.0.0.1", puerto=puerto, vigilancia_s=vigilancia)
+        hw = hardware_prueba(gpio)
+        nav = ruta_prueba(hw)
+        srv = ServidorControl(hw, nav, FakeCamara(), self.token, cal=hw.cal, pan=nav.pan, host="127.0.0.1", puerto=puerto,
+                              vigilancia_s=vigilancia)
         srv.iniciar()
         self.recursos.append(srv)
         return srv, hw, gpio
@@ -96,7 +97,7 @@ class TestEnlace(Base):
         self.assertTrue(esperar(lambda: e.snapshot()["estado"] == "conectado"))
         s = e.snapshot()
         self.assertTrue(esperar(lambda: e.snapshot()["modo"] == "AUTO"))      # Zeno informa su modo al conectar
-        self.assertEqual((s["red"], s["version"]), ("Casa", "3.0.0"))
+        self.assertEqual((s["red"], s["version"]), ("Casa", "4.1.0"))
         self.assertEqual(s["telemetria"]["dir"], "S")
         self.assertLess(s["edad"], 1.0)
 

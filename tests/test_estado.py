@@ -59,7 +59,7 @@ class TestZeno(unittest.TestCase):
              "qr": "ESTACION_2", "seg": "curva", "corriendo": True}
         self.assertEqual(sanear_zeno(e), {"modo": "MANUAL", "direccion": "FL", "velocidad": 45, "distancia": 20.5,
                                           "sensores": [1, 1, 0, 0, 0], "subestado": "ESTACION_DESCARGA",
-                                          "qr": "ESTACION_2", "tramo": "curva", "corriendo": True, "origen": "simulacion"})
+                                          "qr": "ESTACION_2", "tramo": "curva", "corriendo": True, "origen": "simulacion", "logistica": None})
 
     def test_el_origen_solo_puede_ser_real_o_simulacion(self):
         self.assertEqual(sanear_zeno({"origen": "real"})["origen"], "real")

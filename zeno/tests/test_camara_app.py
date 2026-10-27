@@ -9,11 +9,9 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 sys.path.insert(0, os.path.dirname(__file__))
 
-from falsos import FakeCamara, FakeCv2, FakeGPIO, esperar  # noqa: E402
+from falsos import FakeCamara, FakeCv2, FakeGPIO, esperar, hardware_prueba, ruta_prueba  # noqa: E402
 from zeno import config  # noqa: E402
 from zeno.camara import QR_PERSISTENCIA_S, Camara, crear_servidor_video  # noqa: E402
-from zeno.hardware import Hardware  # noqa: E402
-from zeno.logica import Navegador  # noqa: E402
 from zeno.principal import Aplicacion  # noqa: E402
 
 
@@ -114,9 +112,10 @@ class ServidorFalso:
 class TestAplicacion(unittest.TestCase):
     def armar(self, nav=None, hw=None, paso=0.005):
         self.gpio = FakeGPIO()
-        self.hw = hw or Hardware(self.gpio, pausa_servo=0)
+        self.hw = hw or hardware_prueba(self.gpio)
         self.cam = FakeCamara()
-        return Aplicacion(self.hw, self.cam, nav or Navegador("V2"), ServidorFalso(), paso_s=paso)
+        ruta = nav or ruta_prueba(self.hw)
+        return Aplicacion(self.hw, self.cam, ruta, ServidorFalso(), ruta.pan, paso_s=paso)
 
     def test_la_navegacion_mueve_el_motor_con_las_lecturas(self):
         app = self.armar()
@@ -144,11 +143,9 @@ class TestAplicacion(unittest.TestCase):
             app.detener()
 
     def test_si_el_bucle_de_navegacion_se_cuelga_el_supervisor_frena(self):
-        class NavColgado(Navegador):
-            def paso(self, *a, **k):
-                time.sleep(5)
         with patch.object(config, "LATIDO_NAVEGACION_MAX_S", 0.3):
-            app = self.armar(NavColgado("V2"))
+            app = self.armar()
+            app.nav.paso = lambda *a, **k: time.sleep(5)
             self.gpio.pwms[config.PIN_RPWM].duty = 60               # el motor quedó encendido
             app.iniciar()
             try:
@@ -166,6 +163,32 @@ class TestAplicacion(unittest.TestCase):
             self.assertEqual(self.hw.estado_movimiento, "S")
         finally:
             app.detener()
+
+
+class TestCentroQR(unittest.TestCase):
+    class Caja:
+        def __init__(self, xs): self.xs = xs
+        def reshape(self, *a): return [(x, 100) for x in self.xs]
+
+    def camara(self, dato, caja):
+        r = Reloj()
+        c = Camara(cv2=FakeCv2(), reloj=r)
+        c.detector = type("D", (), {"detectAndDecode": lambda s, f: (dato, caja, None)})()
+        return c, r
+
+    def test_centro_normalizado_y_caducidad(self):
+        c, r = self.camara("ESTACION_4", self.Caja([480, 560, 560, 480]))      # QR a la derecha del centro (320)
+        self.assertIsNone(c.qr_centro)
+        c._leer_qr(b"x")
+        self.assertAlmostEqual(c.qr_centro, (520 - 320) / 320.0)
+        r.t += 1.5
+        self.assertIsNone(c.qr_centro)
+
+    def test_cuenta_aunque_no_se_pueda_decodificar(self):
+        c, _ = self.camara("", self.Caja([80, 160]))
+        c._leer_qr(b"x")
+        self.assertLess(c.qr_centro, 0)
+        self.assertEqual(c.qr, "NINGUNO")
 
 
 if __name__ == "__main__":

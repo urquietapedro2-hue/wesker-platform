@@ -3,6 +3,13 @@
 ROLES_CONTROL = frozenset({"ADMIN", "OPERATOR", "MAINTENANCE"})
 
 
+ROLES_CALIBRACION = frozenset({"ADMIN", "MAINTENANCE"})   # cambiar ángulos, velocidades y tiempos de Zeno
+
+
+def puede_calibrar(role: str) -> bool:
+    return role in ROLES_CALIBRACION
+
+
 def puede_controlar(role: str) -> bool:
     return role in ROLES_CONTROL
 

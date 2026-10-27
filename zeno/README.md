@@ -39,6 +39,13 @@ Variables opcionales: `ZENO_LOGICA` (V2|NUEVA), `ZENO_TOKEN` o `ZENO_TOKEN_FILE`
 Zeno envía 20 veces por segundo `TELEM:dir,vel,dist,s1,s2,s3,s4,s5,subestado,qr` (idéntico a V2).
 Video: `http://<ip>:8080/stream.mjpg` (con token: `?t=<token>`).
 
+## Protocolo 4.1 (ruta de 3 estaciones, rampas y calibración)
+- Entrada: `CARGA_RAMPA,1|2` (la rampa quedó cargada; solo vale en su turno), `ABORTAR` (abandona la fase y sigue la línea), `PAN,AUTO|CENTRO|0-180` (solo MANUAL).
+- Calibración (se aplica en vivo; solo `CAL_GUARDAR` escribe el JSON): `CAL_ESQUEMA`, `CAL_GET`, `CAL_SET,clave,valor`, `CAL_GUARDAR`, `CAL_RESTAURAR`, `CAL_DEFECTO`, `CAL_PROBAR,direccion|camara|rampa1|rampa2,grados` (solo MANUAL). Respuestas: `CAL_ESQ:[json]`, `CAL:{json}`, `CAL_ERR:texto`.
+- Salida, después de cada `TELEM`: `RUTA:fase,estacion,carga_r1,carga_r2,alarma,restante_s,backend,i2c,ang_dir,ang_cam,ang_r1,ang_r2,cal_version` (`-` = servo aún sin mover).
+- Calibración en disco: `~/.config/wesker/zeno_calibracion.json` (o `ZENO_CALIBRACION`). `python3 -m zeno --calibracion-defecto` lo crea con los valores de fábrica.
+- Quitados respecto a 4.0: `RESUME`, `CONFIRMAR`, `CARGA_COMPLETA`, `DESCARGAR`, la línea `EXTRA` y la Estación 4.
+
 ## Qué protege
 - Una desconexión brusca ya no tumba el programa (V2 terminaba entero).
 - En MANUAL, sin órdenes ni PING durante `ZENO_VIGILANCIA_S` (2 s) = paro de seguridad.

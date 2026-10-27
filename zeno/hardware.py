@@ -1,16 +1,17 @@
-"""Hardware de Zeno: tracción BTS7960, servo MG995 y regleta de 5 sensores. Mismo comportamiento que ZENO_V2.
+"""Hardware de Zeno: tracción BTS7960, servos (GestorServos) y regleta de 5 sensores. Sin ángulos ni tiempos fijos: salen de la calibración. Mismo comportamiento que ZENO_V2; la dirección usa GestorServos.
 `gpio` se inyecta en las pruebas; en la Raspberry se importa RPi.GPIO."""
 import threading
 import time
 
 from zeno import config
+from zeno.servos import GestorServos
 
 
 class Hardware:
-    def __init__(self, gpio=None, pausa_servo=config.PAUSA_SERVO_S):
+    def __init__(self, cal, gpio=None, servos=None):
         if gpio is None:
             import RPi.GPIO as gpio  # solo existe en la Raspberry
-        self.g, self.pausa_servo = gpio, pausa_servo
+        self.g, self.cal = gpio, cal
         gpio.setmode(gpio.BCM)
         gpio.setwarnings(False)
         gpio.setup(config.PIN_RPWM, gpio.OUT)
@@ -18,23 +19,27 @@ class Hardware:
         self.pwm_fwd, self.pwm_rev = gpio.PWM(config.PIN_RPWM, 1000), gpio.PWM(config.PIN_LPWM, 1000)
         self.pwm_fwd.start(0)
         self.pwm_rev.start(0)
-        gpio.setup(config.PIN_SERVO, gpio.OUT)
-        self.pwm_servo = gpio.PWM(config.PIN_SERVO, 50)
-        self.pwm_servo.start(0)
         for pin in config.PINS_LINEA:
             gpio.setup(pin, gpio.IN, pull_up_down=gpio.PUD_OFF)
+        self.servos = servos if servos is not None else GestorServos(gpio=gpio, cal=cal)   # PCA9685 con respaldo GPIO
         self._lock = threading.Lock()
         self.estado_movimiento, self.velocidad_actual = "S", 0
-        self.angulo_servo, self.sensores = 90.0, [0, 0, 0, 0, 0]
-        self.fijar_angulo(90.0)
+        self.angulo_servo, self.sensores = cal["direccion_centro"], [0, 0, 0, 0, 0]
+        self.fijar_angulo(cal["direccion_centro"])
 
     # ---- dirección ----
     def fijar_angulo(self, angulo):
-        corregido = max(45.0, min(135.0, float(angulo) + config.OFFSET_SERVO_TRIM))
-        self.pwm_servo.ChangeDutyCycle(2.5 + corregido / 18.0)
+        self.servos.mover("direccion", float(angulo), esperar_s=self.cal["direccion_pausa_s"])   # trim, límites y soltado: en GestorServos
         self.angulo_servo = angulo
-        time.sleep(self.pausa_servo)
-        self.pwm_servo.ChangeDutyCycle(0)
+
+    def angulo_de(self, direccion):
+        """Ángulo calibrado de cada giro: izquierda = máximo, derecha = mínimo (se intercambian con direccion_invertida)."""
+        c = self.cal
+        if direccion == "L":
+            return c["direccion_min"] if c["direccion_invertida"] else c["direccion_max"]
+        if direccion == "R":
+            return c["direccion_max"] if c["direccion_invertida"] else c["direccion_min"]
+        return c["direccion_centro"]
 
     # ---- tracción (misma lógica que aplicar_traccion de V2) ----
     def traccion(self, comando, velocidad=45):
@@ -45,18 +50,18 @@ class Hardware:
             if comando == "S":
                 self.pwm_fwd.ChangeDutyCycle(0)
                 self.pwm_rev.ChangeDutyCycle(0)
-                self.fijar_angulo(config.ANGULO_CENTRO)
+                self.fijar_angulo(self.angulo_de("F"))
                 self.estado_movimiento, self.velocidad_actual = "S", 0
                 return
             if comando == "B":
                 self.pwm_fwd.ChangeDutyCycle(0)
                 if self.estado_movimiento != "B":
-                    self.fijar_angulo(config.ANGULO_CENTRO)
+                    self.fijar_angulo(self.angulo_de("F"))
                 self.pwm_rev.ChangeDutyCycle(v)
             elif comando in ("F", "L", "R"):
                 self.pwm_rev.ChangeDutyCycle(0)
                 if self.estado_movimiento != comando:
-                    self.fijar_angulo({"F": config.ANGULO_CENTRO, "L": config.ANGULO_IZQ, "R": config.ANGULO_DER}[comando])
+                    self.fijar_angulo(self.angulo_de(comando))
                 self.pwm_fwd.ChangeDutyCycle(v)
             else:
                 return
@@ -72,9 +77,9 @@ class Hardware:
         """Pulso de diagnóstico en segundo plano (igual que V2; la duración ya viene limitada por el protocolo)."""
         def _pulso():
             if direccion in ("L", "R"):
-                self.fijar_angulo(config.ANGULO_IZQ if direccion == "L" else config.ANGULO_DER)
+                self.fijar_angulo(self.angulo_de(direccion))
                 time.sleep(duracion_ms / 1000.0)
-                self.fijar_angulo(config.ANGULO_CENTRO)
+                self.fijar_angulo(self.angulo_de("F"))
             else:
                 self.traccion(direccion, velocidad)
                 time.sleep(max(50, duracion_ms) / 1000.0)
@@ -92,6 +97,7 @@ class Hardware:
 
     def cerrar(self):
         self.parar_duro()
-        for pwm in (self.pwm_fwd, self.pwm_rev, self.pwm_servo):
+        for pwm in (self.pwm_fwd, self.pwm_rev):
             pwm.stop()
+        self.servos.cerrar()
         self.g.cleanup()
